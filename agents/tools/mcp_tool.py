@@ -1,8 +1,13 @@
 """Tools that interface with MCP servers."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
 from .base import Tool
-from ..utils.connections import MCPConnection
+
+# MCPConnection 只用於下方 __init__ 的字串型別標註 connection: "MCPConnection"，
+# 執行期不需要這個名字。包進 TYPE_CHECKING 可斷開與 connections.py 的 circular import。
+if TYPE_CHECKING:
+    from ..utils.connections import MCPConnection
 
 
 class MCPTool(Tool):

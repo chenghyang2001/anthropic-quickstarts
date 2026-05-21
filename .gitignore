@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 環境變數與機密
+.env
+credentials.json
+token.json
+
+# 虛擬環境
+.venv/
+venv/
+env/
+
+# 測試與打包產物
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+
+# OS / 雜項
+.DS_Store
+*.stackdump
