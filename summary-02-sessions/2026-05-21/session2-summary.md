@@ -42,6 +42,14 @@
 - 兩輪三 agent 流程：初版 → reviewer 提 3 個 must-fix（prompt 走 stdin 避開 Git Bash 32KB 參數上限、`claude` 非零退出要有診斷訊息、`Bash(git:*)` 白名單收窄）→ 修正 → APPROVED
 - 再補 3 個 nice-to-have（writer→QA）：stall detection（連續無進度提前止血）、`SLEEP_INTERVAL` 環境變數、DRY-RUN 訊息修飾
 
+### 衍生產出 2：project-演練 skill（首次收工後追加）
+
+- 應使用者要求，把本 session「演練專案」的可重複流程沉澱成新 skill `project-演練`
+- 8 步驟工作流：探索 → 評估環境 → 裝依賴 → 設定 .env → 啟動 → Puppeteer/測試驗證 → 偵測並修常見 bug → 回報
+- `references/common-bugs.md` 萃取本 session 4 站演練踩到的 rot bug（停用模型、跨平台 npm script、circular import、stale lockfile、硬編碼路徑）
+- `references/project-types.md` 收錄 Next.js / Python CLI / Docker / Agent SDK 四類型的偵測+安裝+執行+驗證做法
+- 全 `.md` 檔，已 commit 至 `~/.claude` repo（`0f2a2fd`）
+
 ---
 
 ## 關鍵技術筆記
@@ -83,8 +91,11 @@ SDK / CLI spawn 出的 Claude Code 子行程**會繼承使用者全域 `~/.claud
 | `customer-support-agent/package-lock.json` | 修改 | npm install 正規化 |
 | `autonomous-coding/prompts/initializer_prompt.md` | 修改 | feature 數 200→5（演練設定） |
 | `autonomous-coding/autonomous_cli_loop.sh` | 新增 | CLI 版自主編碼迴圈（取代 SDK） |
+| `~/.claude/skills/project-演練/SKILL.md` | 新增 | 專案演練自動化 skill 主流程 |
+| `~/.claude/skills/project-演練/references/common-bugs.md` | 新增 | 常見 rot bug 偵測+修復目錄 |
+| `~/.claude/skills/project-演練/references/project-types.md` | 新增 | 各專案類型執行+驗證做法 |
 
-**本 Session 6 個 commit：** `d7b1929`（agents 演練+框架修復）、`0b9dc91`（financial 模型修復）、`9ebbd0b`（initializer prompt 演練設定）、`4f9a2b6`（package-lock 正規化）、`46f2501`（autonomous_cli_loop.sh 新增）、`a1fd1f9`（cli_loop 3 項改進）
+**本 Session commit：** 專案 repo 7 個 — `d7b1929`（agents 演練+框架修復）、`0b9dc91`（financial 模型修復）、`9ebbd0b`（initializer prompt 演練設定）、`4f9a2b6`（package-lock 正規化）、`46f2501`（autonomous_cli_loop.sh 新增）、`a1fd1f9`（cli_loop 3 項改進）、`22616f6`（Session 2 summary）；`~/.claude` repo — `4d19688`（收工同步）、`0f2a2fd`（project-演練 skill）
 
 ---
 
