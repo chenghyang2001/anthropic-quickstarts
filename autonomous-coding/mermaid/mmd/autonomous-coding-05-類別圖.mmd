@@ -1,0 +1,41 @@
+classDiagram
+  class autonomous_agent_demo {
+    +DEFAULT_MODEL
+    +parse_args()
+    +main()
+  }
+  class agent {
+    +AUTO_CONTINUE_DELAY_SECONDS
+    +run_autonomous_agent()
+    +run_agent_session()
+  }
+  class client {
+    +PUPPETEER_TOOLS
+    +BUILTIN_TOOLS
+    +create_client()
+  }
+  class security {
+    +ALLOWED_COMMANDS
+    +bash_security_hook()
+    +extract_commands()
+    +validate_pkill_command()
+    +validate_chmod_command()
+    +validate_init_script()
+  }
+  class progress {
+    +count_passing_tests()
+    +print_session_header()
+    +print_progress_summary()
+  }
+  class prompts {
+    +PROMPTS_DIR
+    +load_prompt()
+    +get_initializer_prompt()
+    +get_coding_prompt()
+    +copy_spec_to_project()
+  }
+  autonomous_agent_demo ..> agent : 呼叫主迴圈
+  agent ..> client : 建立客戶端
+  agent ..> progress : 顯示進度
+  agent ..> prompts : 載入提示詞
+  client ..> security : 註冊 PreToolUse hook

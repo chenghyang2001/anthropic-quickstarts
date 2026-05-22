@@ -1,10 +1,14 @@
-# Autonomous Coding Agent Demo
+# Autonomous Coding Agent Demo｜自主編碼 Agent 範例
 
 A minimal harness demonstrating long-running autonomous coding with the Claude Agent SDK. This demo implements a two-agent pattern (initializer + coding agent) that can build complete applications over multiple sessions.
 
-## Prerequisites
+> 一個最精簡的 harness（驅動外殼程式），用來示範如何透過 Claude Agent SDK 進行「長時間運行的自主編碼」。這個範例實作了**雙 Agent 模式**（初始化 Agent ＋ 編碼 Agent），能夠跨多個 session 打造出完整的應用程式。
+
+## Prerequisites｜事前準備
 
 **Required:** Install the latest versions of both Claude Code and the Claude Agent SDK:
+
+> **必要條件：** 請安裝最新版的 Claude Code 與 Claude Agent SDK：
 
 ```bash
 # Install Claude Code CLI (latest version required)
@@ -15,30 +19,41 @@ pip install -r requirements.txt
 ```
 
 Verify your installations:
+
+> 驗證安裝是否成功：
+
 ```bash
 claude --version  # Should be latest version
 pip show claude-code-sdk  # Check SDK is installed
 ```
 
 **API Key:** Set your Anthropic API key:
+
+> **API 金鑰：** 設定你的 Anthropic API 金鑰：
+
 ```bash
 export ANTHROPIC_API_KEY='your-api-key-here'
 ```
 
-## Quick Start
+## Quick Start｜快速開始
 
 ```bash
 python autonomous_agent_demo.py --project-dir ./my_project
 ```
 
 For testing with limited iterations:
+
+> 若要限制迭代次數來做測試：
+
 ```bash
 python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
 ```
 
-## Important Timing Expectations
+## Important Timing Expectations｜重要的執行時間預期
 
 > **Warning: This demo takes a long time to run!**
+
+> **警告：這個範例會跑很久！**
 
 - **First session (initialization):** The agent generates a `feature_list.json` with 200 test cases. This takes several minutes and may appear to hang - this is normal. The agent is writing out all the features.
 
@@ -46,26 +61,42 @@ python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
 
 - **Full app:** Building all 200 features typically requires **many hours** of total runtime across multiple sessions.
 
+> - **第一個 session（初始化）：** agent 會產生一份含 200 個測試案例的 `feature_list.json`。這會花上好幾分鐘，過程中看起來像當機——這是正常的，agent 正在把所有功能寫出來。
+> - **後續的 session：** 每一輪編碼依複雜度不同，可能花上 **5～15 分鐘**。
+> - **完整應用：** 把全部 200 個功能做完，跨多個 session 加總通常需要**好幾個小時**的執行時間。
+
 **Tip:** The 200 features parameter in the prompts is designed for comprehensive coverage. If you want faster demos, you can modify `prompts/initializer_prompt.md` to reduce the feature count (e.g., 20-50 features for a quicker demo).
 
-## How It Works
+> **提示：** 提示詞裡的「200 個功能」是為了完整覆蓋而設計的。如果想跑快一點的示範，可以修改 `prompts/initializer_prompt.md`，把功能數量調低（例如改成 20～50 個就會快很多）。
 
-### Two-Agent Pattern
+## How It Works｜運作方式
+
+### Two-Agent Pattern｜雙 Agent 模式
 
 1. **Initializer Agent (Session 1):** Reads `app_spec.txt`, creates `feature_list.json` with 200 test cases, sets up project structure, and initializes git.
 
 2. **Coding Agent (Sessions 2+):** Picks up where the previous session left off, implements features one by one, and marks them as passing in `feature_list.json`.
 
-### Session Management
+> 1. **初始化 Agent（第 1 個 session）：** 讀取 `app_spec.txt`，建立含 200 個測試案例的 `feature_list.json`，搭建專案結構，並初始化 git。
+> 2. **編碼 Agent（第 2 個 session 起）：** 接續上一個 session 的進度，逐一實作功能，並在 `feature_list.json` 中把完成的功能標記為通過（passing）。
+
+### Session Management｜Session 管理
 
 - Each session runs with a fresh context window
 - Progress is persisted via `feature_list.json` and git commits
 - The agent auto-continues between sessions (3 second delay)
 - Press `Ctrl+C` to pause; run the same command to resume
 
-## Security Model
+> - 每個 session 都以全新的 context window 執行。
+> - 進度透過 `feature_list.json` 與 git commit 來保存。
+> - agent 會在 session 之間自動接續（間隔 3 秒）。
+> - 按 `Ctrl+C` 可暫停；重新執行同一條指令即可繼續。
+
+## Security Model｜安全模型
 
 This demo uses a defense-in-depth security approach (see `security.py` and `client.py`):
+
+> 這個範例採用「縱深防禦」的安全策略（詳見 `security.py` 與 `client.py`）：
 
 1. **OS-level Sandbox:** Bash commands run in an isolated environment
 2. **Filesystem Restrictions:** File operations restricted to the project directory only
@@ -77,7 +108,17 @@ This demo uses a defense-in-depth security approach (see `security.py` and `clie
 
 Commands not in the allowlist are blocked by the security hook.
 
-## Project Structure
+> 1. **作業系統層級沙箱：** Bash 指令在隔離的環境中執行。
+> 2. **檔案系統限制：** 檔案操作只能在專案目錄內進行。
+> 3. **Bash 白名單：** 只允許特定指令：
+>    - 檔案檢視：`ls`、`cat`、`head`、`tail`、`wc`、`grep`
+>    - Node.js：`npm`、`node`
+>    - 版本控制：`git`
+>    - 程序管理：`ps`、`lsof`、`sleep`、`pkill`（僅限開發用程序）
+>
+> 不在白名單內的指令會被安全 hook 攔截封鎖。
+
+## Project Structure｜專案結構
 
 ```
 autonomous-coding/
@@ -94,9 +135,23 @@ autonomous-coding/
 └── requirements.txt          # Python dependencies
 ```
 
-## Generated Project Structure
+> 各檔案說明：
+> - `autonomous_agent_demo.py`：主程式進入點
+> - `agent.py`：Agent session 的邏輯
+> - `client.py`：Claude SDK 客戶端設定
+> - `security.py`：Bash 指令白名單與驗證
+> - `progress.py`：進度追蹤工具
+> - `prompts.py`：提示詞載入工具
+> - `prompts/app_spec.txt`：應用程式規格
+> - `prompts/initializer_prompt.md`：第一個 session 的提示詞
+> - `prompts/coding_prompt.md`：續做 session 的提示詞
+> - `requirements.txt`：Python 套件相依清單
+
+## Generated Project Structure｜產出的專案結構
 
 After running, your project directory will contain:
+
+> 執行完成後，你的專案目錄會包含：
 
 ```
 my_project/
@@ -108,9 +163,19 @@ my_project/
 └── [application files]       # Generated application code
 ```
 
-## Running the Generated Application
+> 各檔案說明：
+> - `feature_list.json`：測試案例（進度的單一事實來源 / source of truth）
+> - `app_spec.txt`：複製進來的規格檔
+> - `init.sh`：環境設定腳本
+> - `claude-progress.txt`：session 進度筆記
+> - `.claude_settings.json`：安全設定
+> - `[application files]`：產出的應用程式程式碼
+
+## Running the Generated Application｜執行產出的應用程式
 
 After the agent completes (or pauses), you can run the generated application:
+
+> agent 完成（或暫停）後，你可以執行產出的應用程式：
 
 ```bash
 cd generations/my_project
@@ -125,39 +190,58 @@ npm run dev
 
 The application will typically be available at `http://localhost:3000` or similar (check the agent's output or `init.sh` for the exact URL).
 
-## Command Line Options
+> 應用程式通常會在 `http://localhost:3000` 之類的網址啟動（確切網址請看 agent 的輸出或 `init.sh`）。
 
-| Option | Description | Default |
+## Command Line Options｜命令列參數
+
+| Option 參數 | Description 說明 | Default 預設值 |
 |--------|-------------|---------|
-| `--project-dir` | Directory for the project | `./autonomous_demo_project` |
-| `--max-iterations` | Max agent iterations | Unlimited |
-| `--model` | Claude model to use | `claude-sonnet-4-5-20250929` |
+| `--project-dir` | Directory for the project｜專案目錄 | `./autonomous_demo_project` |
+| `--max-iterations` | Max agent iterations｜agent 最大迭代次數 | Unlimited｜無限制 |
+| `--model` | Claude model to use｜要使用的 Claude 模型 | `claude-sonnet-4-5-20250929` |
 
-## Customization
+## Customization｜客製化
 
-### Changing the Application
+### Changing the Application｜更換要打造的應用程式
 
 Edit `prompts/app_spec.txt` to specify a different application to build.
 
-### Adjusting Feature Count
+> 編輯 `prompts/app_spec.txt`，即可指定要打造的另一種應用程式。
+
+### Adjusting Feature Count｜調整功能數量
 
 Edit `prompts/initializer_prompt.md` and change the "200 features" requirement to a smaller number for faster demos.
 
-### Modifying Allowed Commands
+> 編輯 `prompts/initializer_prompt.md`，把「200 個功能」的要求改成較小的數字，示範就會跑得更快。
+
+### Modifying Allowed Commands｜修改允許的指令
 
 Edit `security.py` to add or remove commands from `ALLOWED_COMMANDS`.
 
-## Troubleshooting
+> 編輯 `security.py`，在 `ALLOWED_COMMANDS` 中新增或移除指令。
+
+## Troubleshooting｜疑難排解
 
 **"Appears to hang on first run"**
 This is normal. The initializer agent is generating 200 detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.
 
+> **「第一次執行時看起來像當機」**
+> 這是正常的。初始化 agent 正在產生 200 個詳細的測試案例，會花不少時間。觀察 `[Tool: ...]` 的輸出，就能確認 agent 仍在運作。
+
 **"Command blocked by security hook"**
 The agent tried to run a command not in the allowlist. This is the security system working as intended. If needed, add the command to `ALLOWED_COMMANDS` in `security.py`.
+
+> **「指令被安全 hook 封鎖」**
+> agent 嘗試執行了不在白名單內的指令。這代表安全系統正按預期運作。若有需要，可在 `security.py` 的 `ALLOWED_COMMANDS` 中加入該指令。
 
 **"API key not set"**
 Ensure `ANTHROPIC_API_KEY` is exported in your shell environment.
 
-## License
+> **「API 金鑰未設定」**
+> 請確認 `ANTHROPIC_API_KEY` 已在你的 shell 環境中設定（export）。
+
+## License｜授權
 
 Internal Anthropic use.
+
+> 僅供 Anthropic 內部使用。

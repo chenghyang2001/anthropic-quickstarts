@@ -1,0 +1,29 @@
+stateDiagram-v2
+  [*] --> 啟動
+  啟動 --> 檢查金鑰
+  檢查金鑰 --> 結束 : 金鑰未設定
+  檢查金鑰 --> 判斷專案狀態 : 金鑰 OK
+
+  判斷專案狀態 --> 初始化Session : 無 feature_list.json
+  判斷專案狀態 --> 編碼Session : 已有 feature_list.json
+
+  state 初始化Session {
+    [*] --> 讀取規格
+    讀取規格 --> 產生功能清單
+    產生功能清單 --> 建立專案結構
+    建立專案結構 --> 初始化git
+    初始化git --> [*]
+  }
+
+  state 編碼Session {
+    [*] --> 讀取功能清單
+    讀取功能清單 --> 實作功能
+    實作功能 --> 標記通過
+    標記通過 --> 提交git
+    提交git --> [*]
+  }
+
+  初始化Session --> 編碼Session : 自動接續 3 秒
+  編碼Session --> 編碼Session : 續做下一輪 / 錯誤重試
+  編碼Session --> 結束 : 達 max_iterations 上限
+  結束 --> [*]

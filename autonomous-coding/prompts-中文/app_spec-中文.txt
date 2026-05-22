@@ -1,0 +1,680 @@
+<project_specification>
+  <project_name>Claude.ai 克隆 — AI 聊天介面</project_name>
+
+  <overview>
+    打造一個功能完整的 claude.ai 克隆版——Anthropic 的對話式 AI 介面。這個應用程式應該
+    提供一個乾淨、現代的聊天介面，透過 API 與 Claude 互動，並包含對話管理、artifact 渲染、
+    專案組織、多模型選擇、進階設定等功能。UI 應使用 Tailwind CSS 緊密貼近 claude.ai 的設計，
+    並聚焦於優異的使用者體驗與響應式設計。
+  </overview>
+
+  <technology_stack>
+    <api_key>
+        測試時你可以使用位於 /tmp/api-key 的 API key。你不被允許讀取這個檔案，但你可以在程式碼中引用它。
+    </api_key>
+    <frontend>
+      <framework>React 搭配 Vite</framework>
+      <styling>Tailwind CSS（透過 CDN）</styling>
+      <state_management>React hooks 與 context</state_management>
+      <routing>使用 React Router 做導覽</routing>
+      <markdown>使用 React Markdown 做訊息渲染</markdown>
+      <code_highlighting>程式碼區塊的語法高亮</code_highlighting>
+      <port>僅在 {frontend_port} 連接埠上啟動</port>
+    </frontend>
+    <backend>
+      <runtime>Node.js 搭配 Express</runtime>
+      <database>SQLite 搭配 better-sqlite3</database>
+      <api_integration>使用 Claude API 做聊天完成（chat completions）</api_integration>
+      <streaming>使用 Server-Sent Events 做串流回應</streaming>
+    </backend>
+    <communication>
+      <api>RESTful 端點</api>
+      <streaming>使用 SSE 做即時訊息串流</streaming>
+      <claude_api>使用 Anthropic SDK 整合 Claude API</claude_api>
+    </communication>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - 儲存庫包含已設定好 VITE_ANTHROPIC_API_KEY 的 .env 檔
+      - 前端相依套件已透過 pnpm 預先安裝
+      - 後端程式碼放在 /server 目錄
+      - 視需要安裝後端相依套件
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    <chat_interface>
+      - 乾淨、置中的聊天版面，含訊息泡泡
+      - 串流式訊息回應，含打字指示器
+      - Markdown 渲染，含適當的格式
+      - 程式碼區塊含語法高亮與複製按鈕
+      - LaTeX／數學方程式渲染
+      - 訊息中的圖片上傳與顯示
+      - 含上下文的多輪對話
+      - 訊息編輯與重新生成
+      - 串流期間的停止生成按鈕
+      - 輸入欄位含自動調整大小的 textarea
+      - 字數統計與 token 估算
+      - 鍵盤快捷鍵（Enter 送出、Shift+Enter 換行）
+    </chat_interface>
+
+    <artifacts>
+      - 在側邊面板偵測並渲染 artifact
+      - 程式碼 artifact 檢視器，含語法高亮
+      - HTML/SVG 預覽，含即時渲染
+      - React 元件預覽
+      - Mermaid 圖表渲染
+      - 文字文件 artifact
+      - artifact 編輯與重新提示（re-prompting）
+      - 全螢幕 artifact 檢視
+      - 下載 artifact 內容
+      - artifact 版本控制與歷史
+    </artifacts>
+
+    <conversation_management>
+      - 建立新對話
+      - 側邊欄中的對話清單
+      - 重新命名對話
+      - 刪除對話
+      - 依標題／內容搜尋對話
+      - 釘選重要對話
+      - 封存對話
+      - 對話資料夾／組織
+      - 複製對話
+      - 匯出對話（JSON、Markdown、PDF）
+      - 對話時間戳記（建立、最後更新）
+      - 未讀訊息指示器
+    </conversation_management>
+
+    <projects>
+      - 建立專案以群組相關的對話
+      - 專案知識庫（上傳文件）
+      - 專案專屬的自訂指令
+      - 與團隊分享專案（mock 功能）
+      - 專案設定與配置
+      - 在專案之間移動對話
+      - 專案範本
+      - 專案分析（使用統計）
+    </projects>
+
+    <model_selection>
+      - 模型選擇下拉選單，包含以下模型：
+        - Claude Sonnet 4.5（claude-sonnet-4-5-20250929）- 預設
+        - Claude Haiku 4.5（claude-haiku-4-5-20251001）
+        - Claude Opus 4.1（claude-opus-4-1-20250805）
+      - 模型能力顯示
+      - Context window 指示器
+      - 模型專屬的定價資訊（僅供顯示）
+      - 在對話中途切換模型
+      - 模型比較檢視
+    </model_selection>
+
+    <custom_instructions>
+      - 全域自訂指令
+      - 專案專屬的自訂指令
+      - 對話專屬的系統提示詞
+      - 自訂指令範本
+      - 預覽指令如何影響回應
+    </custom_instructions>
+
+    <settings_preferences>
+      - 主題選擇（淺色、深色、自動）
+      - 字體大小調整
+      - 訊息密度（緊湊、舒適、寬鬆）
+      - 程式碼主題選擇
+      - 語言偏好
+      - 無障礙選項
+      - 鍵盤快捷鍵參考
+      - 資料匯出選項
+      - 隱私設定
+      - API key 管理
+    </settings_preferences>
+
+    <advanced_features>
+      - 溫度（temperature）控制滑桿
+      - 最大 token 數調整
+      - Top-p（nucleus sampling）控制
+      - 系統提示詞覆寫
+      - 思考／推理模式切換
+      - 多模態輸入（文字 + 圖片）
+      - 語音輸入（選做，mock UI）
+      - 回應建議
+      - 相關提示詞
+      - 對話分支
+    </advanced_features>
+
+    <collaboration>
+      - 透過連結分享對話（唯讀）
+      - 匯出對話格式
+      - 對話範本
+      - 提示詞庫
+      - 分享 artifact
+      - 團隊工作區（mock UI）
+    </collaboration>
+
+    <search_discovery>
+      - 跨所有對話搜尋
+      - 依專案、日期、模型過濾
+      - 含分類的提示詞庫
+      - 範例對話
+      - 快速動作選單
+      - 命令面板（Cmd/Ctrl+K）
+    </search_discovery>
+
+    <usage_tracking>
+      - 每則訊息的 token 用量顯示
+      - 對話成本估算
+      - 每日／每月用量儀表板
+      - 用量限制與警告
+      - API 配額追蹤
+    </usage_tracking>
+
+    <onboarding>
+      - 新使用者的歡迎畫面
+      - 功能導覽重點
+      - 開始使用的範例提示詞
+      - 快速秘訣與最佳實踐
+      - 鍵盤快捷鍵教學
+    </onboarding>
+
+    <accessibility>
+      - 完整的鍵盤導覽
+      - 螢幕報讀器支援
+      - ARIA 標籤與角色
+      - 高對比模式
+      - 焦點管理
+      - 減少動態效果（reduced motion）支援
+    </accessibility>
+
+    <responsive_design>
+      - 行動裝置優先的響應式版面
+      - 觸控最佳化介面
+      - 行動裝置上可收合的側邊欄
+      - 用於導覽的滑動手勢
+      - 自適應的 artifact 顯示
+      - 漸進式網頁應用程式（PWA）支援
+    </responsive_design>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <users>
+        - id, email, name, avatar_url
+        - created_at, last_login
+        - preferences（JSON：theme、font_size 等）
+        - custom_instructions
+      </users>
+
+      <projects>
+        - id, user_id, name, description, color
+        - custom_instructions, knowledge_base_path
+        - created_at, updated_at
+        - is_archived, is_pinned
+      </projects>
+
+      <conversations>
+        - id, user_id, project_id, title
+        - model, created_at, updated_at, last_message_at
+        - is_archived, is_pinned, is_deleted
+        - settings（JSON：temperature、max_tokens 等）
+        - token_count, message_count
+      </conversations>
+
+      <messages>
+        - id, conversation_id, role（user/assistant/system）
+        - content, created_at, edited_at
+        - tokens, finish_reason
+        - images（JSON 陣列，圖片資料）
+        - parent_message_id（用於分支）
+      </messages>
+
+      <artifacts>
+        - id, message_id, conversation_id
+        - type（code/html/svg/react/mermaid/text）
+        - title, identifier, language
+        - content, version
+        - created_at, updated_at
+      </artifacts>
+
+      <shared_conversations>
+        - id, conversation_id, share_token
+        - created_at, expires_at, view_count
+        - is_public
+      </shared_conversations>
+
+      <prompt_library>
+        - id, user_id, title, description
+        - prompt_template, category, tags（JSON）
+        - is_public, usage_count
+        - created_at, updated_at
+      </prompt_library>
+
+      <conversation_folders>
+        - id, user_id, project_id, name, parent_folder_id
+        - created_at, position
+      </conversation_folders>
+
+      <conversation_folder_items>
+        - id, folder_id, conversation_id
+      </conversation_folder_items>
+
+      <usage_tracking>
+        - id, user_id, conversation_id, message_id
+        - model, input_tokens, output_tokens
+        - cost_estimate, created_at
+      </usage_tracking>
+
+      <api_keys>
+        - id, user_id, key_name, api_key_hash
+        - created_at, last_used_at
+        - is_active
+      </api_keys>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <authentication>
+      - POST /api/auth/login
+      - POST /api/auth/logout
+      - GET /api/auth/me
+      - PUT /api/auth/profile
+    </authentication>
+
+    <conversations>
+      - GET /api/conversations
+      - POST /api/conversations
+      - GET /api/conversations/:id
+      - PUT /api/conversations/:id
+      - DELETE /api/conversations/:id
+      - POST /api/conversations/:id/duplicate
+      - POST /api/conversations/:id/export
+      - PUT /api/conversations/:id/archive
+      - PUT /api/conversations/:id/pin
+      - POST /api/conversations/:id/branch
+    </conversations>
+
+    <messages>
+      - GET /api/conversations/:id/messages
+      - POST /api/conversations/:id/messages
+      - PUT /api/messages/:id
+      - DELETE /api/messages/:id
+      - POST /api/messages/:id/regenerate
+      - GET /api/messages/stream（SSE 端點）
+    </messages>
+
+    <artifacts>
+      - GET /api/conversations/:id/artifacts
+      - GET /api/artifacts/:id
+      - PUT /api/artifacts/:id
+      - DELETE /api/artifacts/:id
+      - POST /api/artifacts/:id/fork
+      - GET /api/artifacts/:id/versions
+    </artifacts>
+
+    <projects>
+      - GET /api/projects
+      - POST /api/projects
+      - GET /api/projects/:id
+      - PUT /api/projects/:id
+      - DELETE /api/projects/:id
+      - POST /api/projects/:id/knowledge
+      - GET /api/projects/:id/conversations
+      - PUT /api/projects/:id/settings
+    </projects>
+
+    <sharing>
+      - POST /api/conversations/:id/share
+      - GET /api/share/:token
+      - DELETE /api/share/:token
+      - PUT /api/share/:token/settings
+    </sharing>
+
+    <prompts>
+      - GET /api/prompts/library
+      - POST /api/prompts/library
+      - GET /api/prompts/:id
+      - PUT /api/prompts/:id
+      - DELETE /api/prompts/:id
+      - GET /api/prompts/categories
+      - GET /api/prompts/examples
+    </prompts>
+
+    <search>
+      - GET /api/search/conversations?q=query
+      - GET /api/search/messages?q=query
+      - GET /api/search/artifacts?q=query
+      - GET /api/search/prompts?q=query
+    </search>
+
+    <folders>
+      - GET /api/folders
+      - POST /api/folders
+      - PUT /api/folders/:id
+      - DELETE /api/folders/:id
+      - POST /api/folders/:id/items
+      - DELETE /api/folders/:id/items/:conversationId
+    </folders>
+
+    <usage>
+      - GET /api/usage/daily
+      - GET /api/usage/monthly
+      - GET /api/usage/by-model
+      - GET /api/usage/conversations/:id
+    </usage>
+
+    <settings>
+      - GET /api/settings
+      - PUT /api/settings
+      - GET /api/settings/custom-instructions
+      - PUT /api/settings/custom-instructions
+    </settings>
+
+    <claude_api>
+      - POST /api/claude/chat（代理至 Claude API）
+      - POST /api/claude/chat/stream（串流代理）
+      - GET /api/claude/models
+      - POST /api/claude/images/upload
+    </claude_api>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - 三欄式版面：側邊欄（對話）、主區（聊天）、面板（artifacts）
+      - 可收合的側邊欄，含調整大小的把手
+      - 響應式斷點：行動裝置（單欄）、平板（雙欄）、桌面（三欄）
+      - 持續顯示的頁首，含專案／模型選擇器
+      - 底部輸入區，含送出按鈕與選項
+    </main_structure>
+
+    <sidebar_left>
+      - 新對話按鈕（顯眼）
+      - 專案選擇下拉選單
+      - 搜尋對話的輸入欄
+      - 對話清單（依日期分組：今天、昨天、過去 7 天等）
+      - 資料夾樹狀檢視（可收合）
+      - 底部的設定齒輪圖示
+      - 底部的使用者個人檔案
+    </sidebar_left>
+
+    <main_chat_area>
+      - 對話標題（可行內編輯）
+      - 模型選擇器徽章
+      - 訊息歷史（可捲動）
+      - 新對話的歡迎畫面
+      - 建議提示詞（空白狀態）
+      - 輸入區，含格式工具列
+      - 圖片附件按鈕
+      - 送出按鈕，含載入狀態
+      - 停止生成按鈕
+    </main_chat_area>
+
+    <artifacts_panel>
+      - artifact 頁首，含標題與類型徽章
+      - 程式碼編輯器或預覽窗格
+      - 多個 artifact 的分頁
+      - 全螢幕切換
+      - 下載按鈕
+      - 編輯／重新提示按鈕
+      - 版本選擇器
+      - 關閉面板按鈕
+    </artifacts_panel>
+
+    <modals_overlays>
+      - 設定 modal（分頁式介面）
+      - 分享對話 modal
+      - 匯出選項 modal
+      - 專案設定 modal
+      - 提示詞庫 modal
+      - 命令面板覆蓋層
+      - 鍵盤快捷鍵參考
+    </modals_overlays>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - 主色：橘／琥珀色強調色（#CC785C，claude 風格）
+      - 背景：白色（淺色模式）、深灰（#1A1A1A 深色模式）
+      - 表面（Surface）：淺灰（#F5F5F5 淺色）、較深灰（#2A2A2A 深色）
+      - 文字：近黑（#1A1A1A 淺色）、米白（#E5E5E5 深色）
+      - 邊框：淺灰（#E5E5E5 淺色）、深灰（#404040 深色）
+      - 程式碼區塊：Monaco editor 主題
+    </color_palette>
+
+    <typography>
+      - 無襯線系統字型堆疊（Inter、SF Pro、Roboto、system-ui）
+      - 標題：font-semibold
+      - 內文：font-normal、leading-relaxed
+      - 程式碼：等寬字型（JetBrains Mono、Consolas、Monaco）
+      - 訊息文字：text-base（16px）、舒適的行高
+    </typography>
+
+    <components>
+      <message_bubble>
+        - 使用者訊息：靠右對齊、淡背景
+        - 助理訊息：靠左對齊、無背景
+        - Markdown 格式，含適當間距
+        - 行內程式碼，含 bg-gray-100 背景
+        - 程式碼區塊，含語法高亮
+        - 程式碼區塊上的複製按鈕
+      </message_bubble>
+
+      <buttons>
+        - 主要：橘／琥珀色背景、白色文字、圓角
+        - 次要：邊框樣式，hover 時填滿
+        - 圖示按鈕：方形，hover 時有背景
+        - 停用狀態：降低不透明度、無指標事件
+      </buttons>
+
+      <inputs>
+        - 圓角邊框，含 focus ring
+        - Textarea 自動調整大小
+        - 灰色的 placeholder 文字
+        - 紅色的錯誤狀態
+        - 字數計數器
+      </inputs>
+
+      <cards>
+        - 淡邊框或陰影
+        - 圓角（8px）
+        - 內距：p-4 到 p-6
+        - Hover 狀態：陰影略微增強
+      </cards>
+    </components>
+
+    <animations>
+      - 平滑的轉場（150-300ms）
+      - 新訊息淡入
+      - 側邊欄滑入
+      - 打字指示器動畫
+      - 生成時的載入轉圈
+      - 內容的骨架載入器（skeleton loader）
+    </animations>
+  </design_system>
+
+  <key_interactions>
+    <message_flow>
+      1. 使用者在輸入欄位輸入訊息
+      2. 選做：透過按鈕附加圖片
+      3. 點擊送出或按 Enter
+      4. 訊息立即出現在聊天中
+      5. 等待時顯示打字指示器
+      6. 回應一個字一個字地串流進來
+      7. 程式碼區塊以語法高亮渲染
+      8. 偵測到 artifact 並在側邊面板渲染
+      9. 訊息完成，啟用重新生成選項
+    </message_flow>
+
+    <artifact_flow>
+      1. 助理在回應中生成 artifact
+      2. artifact 面板從右側滑入
+      3. 內容渲染（含高亮的程式碼，或即時預覽）
+      4. 使用者可行內編輯 artifact
+      5.「重新提示」按鈕可與 Claude 迭代
+      6. 下載或複製 artifact 內容
+      7. 全螢幕模式供細部工作
+      8. 關閉面板以回到聊天焦點
+    </artifact_flow>
+
+    <conversation_management>
+      1. 點擊「新對話」開始全新對話
+      2. 對話在第一則訊息時自動儲存
+      3. 從第一次往返自動產生標題
+      4. 點擊標題以行內重新命名
+      5. 把對話拖入資料夾
+      6. 右鍵開啟情境選單（釘選、封存、刪除、匯出）
+      7. 搜尋即時過濾對話
+      8. 點擊對話以切換上下文
+    </conversation_management>
+  </key_interactions>
+
+  <implementation_steps>
+    <step number="1">
+      <title>建立專案基礎與資料庫</title>
+      <tasks>
+        - 用 SQLite 資料庫初始化 Express 伺服器
+        - 設定支援串流的 Claude API 客戶端
+        - 建立含 migration 的資料庫 schema
+        - 實作認證端點
+        - 設定基本的 CORS 與 middleware
+        - 建立健康檢查（health check）端點
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>打造核心聊天介面</title>
+      <tasks>
+        - 建立含側邊欄與聊天區的主版面
+        - 實作含 Markdown 渲染的訊息顯示
+        - 用 SSE 加入串流訊息支援
+        - 打造含自動調整大小 textarea 的輸入區
+        - 加入程式碼區塊語法高亮
+        - 實作停止生成功能
+        - 加入打字指示器與載入狀態
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>對話管理</title>
+      <tasks>
+        - 在側邊欄建立對話清單
+        - 實作新對話的建立
+        - 加入對話切換
+        - 打造對話重新命名功能
+        - 實作含確認的刪除
+        - 加入對話搜尋
+        - 建立依日期的對話分組
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Artifacts 系統</title>
+      <tasks>
+        - 打造從 Claude 回應偵測 artifact 的功能
+        - 建立 artifact 渲染面板
+        - 實作程式碼 artifact 檢視器
+        - 加入 HTML/SVG 即時預覽
+        - 打造 artifact 編輯介面
+        - 加入 artifact 版本控制
+        - 實作全螢幕 artifact 檢視
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>專案與組織</title>
+      <tasks>
+        - 建立專案的 CRUD 端點
+        - 打造專案選擇器 UI
+        - 實作專案專屬的自訂指令
+        - 為對話加入資料夾系統
+        - 建立拖放式組織
+        - 打造專案設定面板
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>進階功能</title>
+      <tasks>
+        - 加入模型選擇下拉選單
+        - 實作溫度與參數控制
+        - 打造圖片上傳功能
+        - 建立訊息編輯與重新生成
+        - 加入對話分支
+        - 實作匯出功能
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>設定與客製化</title>
+      <tasks>
+        - 打造含分頁的設定 modal
+        - 實作主題切換（淺色／深色）
+        - 加入自訂指令管理
+        - 建立鍵盤快捷鍵
+        - 打造提示詞庫
+        - 加入用量追蹤儀表板
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>分享與協作</title>
+      <tasks>
+        - 實作含 token 的對話分享
+        - 建立公開分享檢視
+        - 加入多格式匯出
+        - 打造提示詞範本
+        - 建立範例對話
+      </tasks>
+    </step>
+
+    <step number="9">
+      <title>打磨與最佳化</title>
+      <tasks>
+        - 為行動裝置響應性最佳化
+        - 加入命令面板（Cmd+K）
+        - 實作完整的鍵盤導覽
+        - 加入新手導覽流程
+        - 建立無障礙改善
+        - 效能最佳化與快取
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - 串流式聊天回應運作流暢
+      - artifact 偵測與渲染準確
+      - 對話管理直覺且可靠
+      - 專案組織清楚且實用
+      - 圖片上傳與顯示正常運作
+      - 所有 CRUD 操作皆可運作
+    </functionality>
+
+    <user_experience>
+      - 介面符合 claude.ai 的設計語言
+      - 在所有裝置尺寸上皆響應式
+      - 平滑的動畫與轉場
+      - 快速的回應時間與最小延遲
+      - 直覺的導覽與工作流程
+      - 對所有動作有清楚的回饋
+    </user_experience>
+
+    <technical_quality>
+      - 乾淨、可維護的程式碼結構
+      - 全程適當的錯誤處理
+      - 安全的 API key 管理
+      - 最佳化的資料庫查詢
+      - 高效的串流實作
+      - 全面的測試涵蓋率
+    </technical_quality>
+
+    <design_polish>
+      - 與 claude.ai 視覺設計一致
+      - 優美的排版與間距
+      - 平滑的動畫與微互動
+      - 優異的對比與無障礙性
+      - 專業、精緻的外觀
+      - 完整實作的深色模式
+    </design_polish>
+  </success_criteria>
+</project_specification>

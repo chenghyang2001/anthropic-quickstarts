@@ -1,0 +1,32 @@
+sequenceDiagram
+  actor U as 使用者
+  participant D as demo 進入點
+  participant A as agent 主迴圈
+  participant C as client SDK 設定
+  participant H as 安全 hook
+  participant K as Claude Agent SDK
+  participant F as 專案檔案 / git
+
+  U->>D: python autonomous_agent_demo.py
+  D->>D: 檢查 ANTHROPIC_API_KEY
+  D->>A: run_autonomous_agent()
+  A->>A: 檢查 feature_list.json 是否存在
+
+  loop 每個 session（while True）
+    A->>C: create_client() 建立全新 context
+    C->>C: 寫入 .claude_settings.json
+    A->>K: query(initializer 或 coding 提示詞)
+    loop 串流回應
+      K-->>A: AssistantMessage 文字 / 工具呼叫
+      K->>H: PreToolUse 驗證 Bash 指令
+      alt 指令在白名單內
+        H-->>K: 放行執行
+        K->>F: 讀寫檔案 / git commit
+      else 不在白名單
+        H-->>K: block 封鎖
+      end
+    end
+    A->>A: 等待 3 秒後接續下一 session
+  end
+
+  A->>U: 印出最終總結與執行指引
