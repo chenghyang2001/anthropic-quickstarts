@@ -1,0 +1,26 @@
+mindmap
+  root((agents 專案))
+    專案定位
+      Anthropic 官方教學範例
+      不是 SDK
+      核心程式不到 300 行
+      刻意極簡可移植
+    核心理念
+      LLM + 工具 + 迴圈
+      工具呼叫驅動迴圈
+      有工具就繼續沒工具就結束
+    三大組成
+      agent.py 大腦
+      tools 手腳
+      utils 記憶與連線
+    工具三類
+      本地工具 Think File
+      Server 工具 WebSearch CodeExec
+      MCP 工具 外部程序
+    設計亮點
+      工具平行執行 asyncio
+      對話歷史自動截斷
+      Prompt Caching 省錢
+    進入點
+      建立 Agent 物件
+      呼叫 agent.run

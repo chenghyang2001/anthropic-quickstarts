@@ -7,16 +7,16 @@
 
 執行方式（PowerShell）：
     $env:ANTHROPIC_API_KEY = "sk-ant-..."
-    python doc/practice_01_think.py
+    python agents/doc/practice_01_think.py
 """
 
 import os
 import sys
 from pathlib import Path
 
-# 腳本位於 repo 的 doc/ 底下，parent.parent 即 repo 根目錄。
+# 腳本位於 agents/doc/ 底下，往上三層 parent 即 repo 根目錄。
 # 自我定位而非硬編碼路徑，使用者從任何工作目錄執行都能跑。
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # 讓 import agents 找得到套件（套件不在 site-packages，需手動加入搜尋路徑）。
 sys.path.insert(0, str(REPO_ROOT))
 # 切到 repo 根目錄，後續關卡的檔案工具相對路徑（如 agents/README.md）才能正確解析。
@@ -61,17 +61,24 @@ def main():
         verbose=True,
     )
 
-    user_input = "請告訴我台灣最高的山是哪座，以及它的高度？"
+    # 用 list 集中管理題目，之後要增減題目只動這裡，迴圈邏輯不必改。
+    questions = [
+        "請告訴我台灣最高的山是哪座，以及它的高度？",
+        "請告訴我台灣最高的建築物是哪一棟，以及它的高度？",
+    ]
 
-    try:
-        response = agent.run(user_input)
-    except Exception as e:
-        # 不裸 except 後靜默吞掉：印出具體錯誤供使用者排查（網路、認證、API 限額等）。
-        print(f"錯誤：Agent 執行失敗 - {e}", file=sys.stderr)
-        sys.exit(1)
+    # 兩題共用同一個 agent 實例：省去重複建立的開銷，也讓 system prompt 一致。
+    for index, user_input in enumerate(questions, start=1):
+        try:
+            response = agent.run(user_input)
+        except Exception as e:
+            # 不裸 except 後靜默吞掉：印出具體錯誤供使用者排查（網路、認證、API 限額等）。
+            print(f"錯誤：第 {index} 題 Agent 執行失敗 - {e}", file=sys.stderr)
+            sys.exit(1)
 
-    print("\n=== 最終回答 ===")
-    print_text_blocks(response)
+        # 標題帶上題號，多題輸出時使用者才能對應到是哪一題的答案。
+        print(f"\n=== 第 {index} 題最終回答 ===")
+        print_text_blocks(response)
 
 
 if __name__ == "__main__":

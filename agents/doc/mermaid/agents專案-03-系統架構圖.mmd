@@ -1,0 +1,25 @@
+block-beta
+  columns 3
+  caller["進入點\nagent.run()"]:3
+  space:3
+  block:core:3
+    columns 3
+    loop["_agent_loop\n核心 while 迴圈"]
+    hist["MessageHistory\n歷史 token 快取截斷"]
+    exec["execute_tools\nasyncio 平行執行"]
+  end
+  space:3
+  local["本地工具\nThink File"]
+  server["Server 工具\nWebSearch CodeExec"]
+  mcp["MCP 工具\nMCPTool 橋接"]
+  space:3
+  capi["Claude API"]
+  asrv["Anthropic 伺服器端\n搜尋與程式執行"]
+  msrv["MCP 伺服器\n例 calculator"]
+  caller --> loop
+  loop --> local
+  loop --> server
+  loop --> mcp
+  loop --> capi
+  server --> asrv
+  mcp --> msrv

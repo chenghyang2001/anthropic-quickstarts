@@ -7,16 +7,16 @@
 
 執行方式（PowerShell）：
     $env:ANTHROPIC_API_KEY = "sk-ant-..."
-    python doc/practice_02_files.py
+    python agents/doc/practice_02_files.py
 """
 
 import os
 import sys
 from pathlib import Path
 
-# 腳本位於 repo 的 doc/ 底下，parent.parent 即 repo 根目錄。
+# 腳本位於 agents/doc/ 底下，往上三層 parent 即 repo 根目錄。
 # 自我定位而非硬編碼路徑，使用者從任何工作目錄執行都能跑。
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # 讓 import agents 找得到套件（套件不在 site-packages，需手動加入搜尋路徑）。
 sys.path.insert(0, str(REPO_ROOT))
 # 切到 repo 根目錄，檔案工具的相對路徑（agents/README.md、agents/summary.txt）才能正確解析。

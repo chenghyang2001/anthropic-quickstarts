@@ -1,0 +1,16 @@
+flowchart TD
+    A([使用者輸入]) --> B[加入 MessageHistory]
+    B --> C{{進入 while 迴圈}}
+    C --> D[truncate 截斷過長歷史]
+    D --> E[組裝參數並呼叫 Claude API]
+    E --> F[儲存 assistant 回應到歷史]
+    F --> G{回應含 tool_use?}
+    G -->|有工具呼叫| H[execute_tools 平行執行工具]
+    H --> I[工具結果以 user 角色塞回歷史]
+    I --> C
+    G -->|無工具呼叫| J([回傳最終答案 結束迴圈])
+
+    subgraph 工具執行
+        H
+        I
+    end

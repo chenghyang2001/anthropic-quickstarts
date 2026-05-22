@@ -25,3 +25,7 @@ node_modules/
 # OS / 雜項
 .DS_Store
 *.stackdump
+
+# 演練產出（大型二進位 / 自動生成，不入版控）
+agents/doc/notebooklm/
+agents/summary.txt
