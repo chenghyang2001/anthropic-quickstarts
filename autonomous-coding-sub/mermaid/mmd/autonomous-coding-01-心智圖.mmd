@@ -1,0 +1,29 @@
+mindmap
+  root((自主編碼 Agent Demo))
+    雙 Agent 模式
+      初始化 Agent 首次
+        讀 app_spec.txt
+        產生 200 個功能清單
+        建立專案結構與 git
+      編碼 Agent 後續
+        逐一實作功能
+        標記 passes 通過
+        git commit 保存
+    主迴圈 while True
+      每 session 全新 context
+      max_iterations 次數上限
+      自動接續間隔 3 秒
+      Ctrl+C 暫停可續做
+    三層安全防禦
+      OS 沙箱隔離
+      檔案系統限制 project_dir
+      Bash 白名單 hook
+    核心模組
+      demo 進入點
+      agent 迴圈邏輯
+      client SDK 設定
+      security 指令驗證
+    進度保存機制
+      feature_list.json 真相來源
+      git commit 歷史
+      claude-progress.txt

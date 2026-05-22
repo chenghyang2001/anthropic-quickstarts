@@ -1,0 +1,30 @@
+flowchart TD
+  Start([啟動 autonomous_agent_demo.py]) --> CheckKey{API 金鑰<br/>已設定?}
+  CheckKey -->|否| ExitKey[印出錯誤訊息並結束]
+  CheckKey -->|是| Resolve[解析 project_dir<br/>放入 generations/]
+  Resolve --> Mkdir[建立專案目錄]
+  Mkdir --> CheckFL{feature_list.json<br/>已存在?}
+  CheckFL -->|否·首次執行| CopySpec[複製 app_spec.txt<br/>標記首次執行]
+  CheckFL -->|是·續做| ShowProg[顯示目前進度]
+  CopySpec --> Iter
+  ShowProg --> Iter
+
+  subgraph MainLoop[主迴圈 while True]
+    Iter[iteration + 1] --> CheckMax{超過<br/>max_iterations?}
+    CheckMax -->|是| BreakLoop[跳出迴圈]
+    CheckMax -->|否| Header[印出 session 標題]
+    Header --> CreateClient[create_client<br/>建立全新 context]
+    CreateClient --> PickPrompt{首次執行?}
+    PickPrompt -->|是| InitPrompt[載入 initializer 提示詞]
+    PickPrompt -->|否| CodePrompt[載入 coding 提示詞]
+    InitPrompt --> RunSession[run_agent_session<br/>送出 prompt·收回應]
+    CodePrompt --> RunSession
+    RunSession --> Status{執行結果?}
+    Status -->|continue| Sleep3[等待 3 秒<br/>顯示進度]
+    Status -->|error| Retry[等待 3 秒<br/>重試新 session]
+    Sleep3 --> Iter
+    Retry --> Iter
+  end
+
+  BreakLoop --> Final[最終總結<br/>印出執行指引]
+  Final --> End([結束])

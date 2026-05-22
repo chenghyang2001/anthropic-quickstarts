@@ -1,0 +1,31 @@
+block-beta
+  columns 3
+
+  demo["進入點\nautonomous_agent_demo.py"]:3
+  space:3
+
+  agent["agent.py\n主迴圈"]
+  client["client.py\nSDK 設定"]
+  security["security.py\n指令驗證"]
+  space:3
+
+  progress["progress.py\n進度追蹤"]
+  prompts["prompts.py\n提示詞載入"]
+  promptdir["prompts/\n規格與提示詞"]
+  space:3
+
+  sdk["Claude Agent SDK"]:2
+  guard["三層安全防禦"]
+  space:3
+
+  output["產出：feature_list.json / git / 應用程式"]:3
+
+  demo --> agent
+  agent --> client
+  agent --> progress
+  agent --> prompts
+  prompts --> promptdir
+  client --> security
+  client --> sdk
+  security --> guard
+  agent --> output
