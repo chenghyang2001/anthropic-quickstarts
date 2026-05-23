@@ -99,8 +99,15 @@ fi
 
 # --- 設定階段 ----------------------------------------------------------------
 
-# 建立專案目錄。
+# 建立專案目錄，並立即初始化獨立的 git repo。
+# 若不在此處 git init，claude 的 git 操作會冒泡命中外層 harness repo 的 .git，
+# 把 app code 誤 commit 到 harness 裡（已實證踩坑：vps_run1）。
 mkdir -p "$PROJECT_DIR"
+if [ ! -d "$PROJECT_DIR/.git" ]; then
+  git -C "$PROJECT_DIR" init -q
+  git -C "$PROJECT_DIR" config user.email "agent@autonomous-coding"
+  git -C "$PROJECT_DIR" config user.name "Autonomous Agent"
+fi
 
 # 複製 app_spec.txt 進專案目錄，讓 claude 從 cwd（PROJECT_DIR）直接讀得到。
 cp "$PROMPTS_DIR/app_spec.txt" "$PROJECT_DIR/app_spec.txt"

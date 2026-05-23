@@ -1,3 +1,11 @@
+## CRITICAL: WORKING DIRECTORY CONSTRAINT
+
+**Your current working directory IS the project directory. You MUST stay in it.**
+
+- DO NOT run  to any other directory
+- All file reads/writes MUST use relative paths
+- Run /home/claude first to confirm your working directory, then work exclusively there
+
 ## YOUR ROLE - CODING AGENT
 
 You are continuing work on a long-running autonomous development task.
