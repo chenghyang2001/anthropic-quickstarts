@@ -193,10 +193,15 @@ if [ ! -f "feature_list.json" ]; then
       --verbose \
       >> "$_INIT_TMPOUT" &
     _INIT_CPID=$!
-    set +e; set +o pipefail
-    tail -n +1 -f "$_INIT_TMPOUT" | PYTHONUTF8=1 python "$PARSER_PATH"
-    _INIT_PEXIT=${PIPESTATUS[1]}
-    set -e; set -o pipefail
+    # 直接把 tmpout 路徑傳給 parser，取代舊的 tail -n +1 -f ... | python pipeline。
+    # tail -f 只有在嘗試寫新資料時才收 SIGPIPE；session 結束後若無新資料，
+    # tail 永遠不退出，整個 pipeline 因此 deadlock。
+    # 改用 poll_file 模式直接讀檔，根本消除 deadlock。
+    # _INIT_TMPOUT 是 MSYS2 風格路徑（/tmp/...），Windows 原生 Python 需 cygpath -w 轉換。
+    set +e
+    PYTHONUTF8=1 python "$PARSER_PATH" "$(cygpath -w "$_INIT_TMPOUT" 2>/dev/null || echo "$_INIT_TMPOUT")"
+    _INIT_PEXIT=$?
+    set -e
     kill "$_INIT_CPID" 2>/dev/null; wait "$_INIT_CPID" 2>/dev/null || true
     rm -f "$_INIT_TMPOUT"
     if [ $_INIT_PEXIT -ne 0 ]; then
@@ -287,10 +292,15 @@ for i in $(seq 1 "$MAX_ITER"); do
     --verbose \
     >> "$_CODING_TMPOUT" &
   _CODING_CPID=$!
-  set +e; set +o pipefail
-  tail -n +1 -f "$_CODING_TMPOUT" | PYTHONUTF8=1 python "$PARSER_PATH"
-  _CODING_PEXIT=${PIPESTATUS[1]}
-  set -e; set -o pipefail
+  # 直接把 tmpout 路徑傳給 parser，取代舊的 tail -n +1 -f ... | python pipeline。
+  # tail -f 只有在嘗試寫新資料時才收 SIGPIPE；session 結束後若無新資料，
+  # tail 永遠不退出，整個 pipeline 因此 deadlock。
+  # 改用 poll_file 模式直接讀檔，根本消除 deadlock。
+  # _CODING_TMPOUT 是 MSYS2 風格路徑（/tmp/...），Windows 原生 Python 需 cygpath -w 轉換。
+  set +e
+  PYTHONUTF8=1 python "$PARSER_PATH" "$(cygpath -w "$_CODING_TMPOUT" 2>/dev/null || echo "$_CODING_TMPOUT")"
+  _CODING_PEXIT=$?
+  set -e
   kill "$_CODING_CPID" 2>/dev/null; wait "$_CODING_CPID" 2>/dev/null || true
   rm -f "$_CODING_TMPOUT"
   if [ $_CODING_PEXIT -ne 0 ]; then
