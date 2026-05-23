@@ -53,6 +53,9 @@ PROMPTS_DIR="$SCRIPT_DIR/prompts"
 PROJECT_DIR="$SCRIPT_DIR/generations/$PROJECT_NAME"
 # Git Bash 的 /c/Users/... 路徑直接餵 Windows Python 會變成 C:\c\Users\...，必須 cygpath -w 轉成 Windows 風格
 PARSER_PATH="$(cygpath -w "$SCRIPT_DIR/scripts/parse_claude_stream.py" 2>/dev/null || echo "$SCRIPT_DIR/scripts/parse_claude_stream.py")"
+# Git Bash 路徑傳給 Windows 原生 Claude CLI 前必須用 cygpath -w 轉換，否則 /c/Users/... 會變 C:\c\Users\...
+INITIALIZER_PROMPT_WIN="$(cygpath -w "$PROMPTS_DIR/initializer_prompt.md" 2>/dev/null || echo "$PROMPTS_DIR/initializer_prompt.md")"
+CODING_PROMPT_WIN="$(cygpath -w "$PROMPTS_DIR/coding_prompt.md" 2>/dev/null || echo "$PROMPTS_DIR/coding_prompt.md")"
 
 # --- 前置檢查（preflight） ---------------------------------------------------
 # 任一硬性檢查失敗：印繁中錯誤訊息到 stderr 並 exit 1。
@@ -103,13 +106,29 @@ cp "$PROMPTS_DIR/app_spec.txt" "$PROJECT_DIR/app_spec.txt"
 
 # 寫入專案層級 .claude/settings.json：每次執行覆寫即可。
 # 此設定給 claude 子程序自動 accept 編輯權限 + 白名單常用工具，
+# 含 puppeteer MCP 工具白名單（搭配下方 .mcp.json 才生效）。
 # 讓自主迴圈不會卡在權限確認。
 mkdir -p "$PROJECT_DIR/.claude"
 cat > "$PROJECT_DIR/.claude/settings.json" <<'EOF'
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash(npm:*)", "Bash(node:*)", "Bash(git init:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(pwd)", "Bash(cp:*)"]
+    "defaultMode": "bypassPermissions",
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash(npm:*)", "Bash(node:*)", "Bash(git init:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(pwd)", "Bash(cp:*)", "Bash(netstat:*)", "Bash(powershell.exe:*)", "Bash(taskkill:*)", "Bash(findstr:*)", "Bash(curl:*)", "Bash(cmd:*)", "Bash(kill:*)", "Bash(chmod:*)", "Bash(npx:*)", "Bash(rm:*)", "Bash(mv:*)", "Bash(touch:*)", "Bash(echo:*)", "Bash(sed:*)", "Bash(awk:*)", "Bash(env:*)", "Bash(export:*)", "Bash(bash:*)", "Bash(sh:*)", "Bash(python:*)", "Bash(python3:*)", "Bash(pip:*)", "Bash(type:*)", "Bash(which:*)", "Bash(where:*)", "Bash(tasklist:*)", "Bash(lsof:*)", "Bash(pkill:*)", "Bash(date:*)", "Bash(sleep:*)", "mcp__puppeteer__puppeteer_navigate", "mcp__puppeteer__puppeteer_screenshot", "mcp__puppeteer__puppeteer_click", "mcp__puppeteer__puppeteer_fill", "mcp__puppeteer__puppeteer_select", "mcp__puppeteer__puppeteer_hover", "mcp__puppeteer__puppeteer_evaluate"]
+  }
+}
+EOF
+
+# 寫入專案層級 .mcp.json：宣告 puppeteer MCP server。
+# claude CLI 偵測到 PROJECT_DIR 有 .mcp.json 就會 spawn 對應 server，
+# 之後 settings.json allow list 裡的 mcp__puppeteer__* 工具才會生效。
+# 對齊 Python 版 client.py:107-109 的 mcp_servers={"puppeteer": {"command":"npx", "args":["puppeteer-mcp-server"]}}
+cat > "$PROJECT_DIR/.mcp.json" <<'EOF'
+{
+  "mcpServers": {
+    "puppeteer": {
+      "command": "npx",
+      "args": ["puppeteer-mcp-server"]
+    }
   }
 }
 EOF
@@ -152,13 +171,8 @@ if [ ! -f "feature_list.json" ]; then
   if [ "$DRY_RUN" = "1" ]; then
     # 用文字描述而非顯示含 < 重導向的指令：若直接把 "< '路徑'" 寫進 echo 字串，
     # 使用者整行複製貼上時 < 會被 shell 當成重導向而誤觸發。
-    echo "[DRY-RUN] 將執行 initializer session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/initializer_prompt.md 以 stdin 讀入 prompt）"
+    echo "[DRY-RUN] 將執行 initializer session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/initializer_prompt.md 以 --system-prompt-file 傳入，user message 為 \"Begin. Execute all initialization tasks now.\"）"
   else
-    # prompt 用 stdin 重導向餵入，不當命令列參數：
-    # Git Bash（MSYS2）命令列長度上限約 32KB，prompt 檔變長時用 "$(cat ...)"
-    # 當單一 argument 會觸發「Argument list too long」或被截斷而靜默失敗。
-    # claude -p 不給位置參數時會改從 stdin 讀，繞過參數長度上限。
-    #
     # 用 if ! ... 包裹的理由：if 條件位置的指令不受 set -e 中止，
     # 因此 claude 非零退出時能落到 then 分支印診斷訊息再 exit，
     # 而不是被 set -e 直接 silent exit、讓使用者隔天看不出跑到第幾圈。
@@ -167,13 +181,15 @@ if [ ! -f "feature_list.json" ]; then
     # （含 tool_use / tool_result / text block），透過 pipe 餵給 Python parser
     # 翻成可讀的 [Tool: ...] / [OK] / > text 行。
     # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
-    if ! DISABLE_WRITER_QA_HOOK=1 claude -p \
+    #
+    # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
+    if ! DISABLE_WRITER_QA_HOOK=1 claude -p "Begin. Execute all initialization tasks now." \
+      --system-prompt-file "$INITIALIZER_PROMPT_WIN" \
       --model "$MODEL" \
-      --permission-mode acceptEdits \
+      --permission-mode bypassPermissions \
       --max-turns 200 \
       --output-format stream-json \
       --verbose \
-      < "$PROMPTS_DIR/initializer_prompt.md" \
       | PYTHONUTF8=1 python "$PARSER_PATH"; then
       echo "錯誤：initializer session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。中止迴圈。" >&2
       exit 1
@@ -203,7 +219,7 @@ for i in $(seq 1 "$MAX_ITER"); do
     echo ""
     echo "--- coding 迴圈（DRY-RUN 示意，不讀 feature_list.json） ---"
     # 用文字描述而非顯示含 < 重導向的指令：避免使用者整行複製貼上時誤觸發。
-    echo "[DRY-RUN] 將執行 coding session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/coding_prompt.md 以 stdin 讀入 prompt）"
+    echo "[DRY-RUN] 將執行 coding session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/coding_prompt.md 以 --system-prompt-file 傳入，user message 為 \"Continue. Execute your coding task now.\"）"
     # 乾跑時不真的跑迴圈，印一次示意指令後即跳出。
     break
   fi
@@ -242,11 +258,6 @@ for i in $(seq 1 "$MAX_ITER"); do
   echo ""
   echo "--- Session $((i + 1))：coding（第 $i/$MAX_ITER 圈，剩餘 $remaining 個 feature） ---"
 
-  # prompt 用 stdin 重導向餵入，不當命令列參數：
-  # Git Bash（MSYS2）命令列長度上限約 32KB，prompt 檔變長時用 "$(cat ...)"
-  # 當單一 argument 會觸發「Argument list too long」或被截斷而靜默失敗。
-  # claude -p 不給位置參數時會改從 stdin 讀，繞過參數長度上限。
-  #
   # 用 if ! ... 包裹的理由：if 條件位置的指令不受 set -e 中止，
   # 因此 claude 非零退出時能落到 then 分支印診斷訊息再 exit，
   # 而不是被 set -e 直接 silent exit、讓使用者隔天看不出跑到第幾圈。
@@ -255,13 +266,15 @@ for i in $(seq 1 "$MAX_ITER"); do
   # （含 tool_use / tool_result / text block），透過 pipe 餵給 Python parser
   # 翻成可讀的 [Tool: ...] / [OK] / > text 行。
   # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
-  if ! DISABLE_WRITER_QA_HOOK=1 claude -p \
+  #
+  # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
+  if ! DISABLE_WRITER_QA_HOOK=1 claude -p "Continue. Execute your coding task now." \
+    --system-prompt-file "$CODING_PROMPT_WIN" \
     --model "$MODEL" \
-    --permission-mode acceptEdits \
+    --permission-mode bypassPermissions \
     --max-turns 200 \
     --output-format stream-json \
     --verbose \
-    < "$PROMPTS_DIR/coding_prompt.md" \
     | PYTHONUTF8=1 python "$PARSER_PATH"; then
     echo "錯誤：第 $i 圈 coding session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。剩餘 $remaining 個 feature，中止迴圈。" >&2
     exit 1
