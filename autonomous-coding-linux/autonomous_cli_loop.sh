@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # ==============================================================================
-# autonomous_cli_loop.sh
+# autonomous_cli_loop.sh  (Linux 版)
+#
+# autonomous-coding-sub/autonomous_cli_loop.sh 的 Linux 相容版。
+# 差異：移除 cygpath -w、python → python3、移除 PYTHONUTF8=1。
 #
 # autonomous_agent_demo.py 的 CLI 等價版。
 #
@@ -51,11 +54,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PROMPTS_DIR="$SCRIPT_DIR/prompts"
 PROJECT_DIR="$SCRIPT_DIR/generations/$PROJECT_NAME"
-# Git Bash 的 /c/Users/... 路徑直接餵 Windows Python 會變成 C:\c\Users\...，必須 cygpath -w 轉成 Windows 風格
-PARSER_PATH="$(cygpath -w "$SCRIPT_DIR/scripts/parse_claude_stream.py" 2>/dev/null || echo "$SCRIPT_DIR/scripts/parse_claude_stream.py")"
-# Git Bash 路徑傳給 Windows 原生 Claude CLI 前必須用 cygpath -w 轉換，否則 /c/Users/... 會變 C:\c\Users\...
-INITIALIZER_PROMPT_WIN="$(cygpath -w "$PROMPTS_DIR/initializer_prompt.md" 2>/dev/null || echo "$PROMPTS_DIR/initializer_prompt.md")"
-CODING_PROMPT_WIN="$(cygpath -w "$PROMPTS_DIR/coding_prompt.md" 2>/dev/null || echo "$PROMPTS_DIR/coding_prompt.md")"
+PARSER_PATH="$SCRIPT_DIR/scripts/parse_claude_stream.py"
+INITIALIZER_PROMPT="$PROMPTS_DIR/initializer_prompt.md"
+CODING_PROMPT="$PROMPTS_DIR/coding_prompt.md"
 
 # --- 前置檢查（preflight） ---------------------------------------------------
 # 任一硬性檢查失敗：印繁中錯誤訊息到 stderr 並 exit 1。
@@ -66,9 +67,9 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-# python 用來解析 feature_list.json，沒有就無法計算剩餘 feature 數。
-if ! command -v python >/dev/null 2>&1; then
-  echo "錯誤：找不到 python，本腳本需要 python 來解析 feature_list.json。" >&2
+# python3 用來解析 feature_list.json，沒有就無法計算剩餘 feature 數。
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "錯誤：找不到 python3，本腳本需要 python3 來解析 feature_list.json。" >&2
   exit 1
 fi
 
@@ -113,7 +114,7 @@ cat > "$PROJECT_DIR/.claude/settings.json" <<'EOF'
 {
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash(npm:*)", "Bash(node:*)", "Bash(git init:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(pwd)", "Bash(cp:*)", "Bash(netstat:*)", "Bash(powershell.exe:*)", "Bash(taskkill:*)", "Bash(findstr:*)", "Bash(curl:*)", "Bash(cmd:*)", "Bash(kill:*)", "Bash(chmod:*)", "Bash(npx:*)", "Bash(rm:*)", "Bash(mv:*)", "Bash(touch:*)", "Bash(echo:*)", "Bash(sed:*)", "Bash(awk:*)", "Bash(env:*)", "Bash(export:*)", "Bash(bash:*)", "Bash(sh:*)", "Bash(python:*)", "Bash(python3:*)", "Bash(pip:*)", "Bash(type:*)", "Bash(which:*)", "Bash(where:*)", "Bash(tasklist:*)", "Bash(lsof:*)", "Bash(pkill:*)", "Bash(date:*)", "Bash(sleep:*)", "mcp__puppeteer__puppeteer_navigate", "mcp__puppeteer__puppeteer_screenshot", "mcp__puppeteer__puppeteer_click", "mcp__puppeteer__puppeteer_fill", "mcp__puppeteer__puppeteer_select", "mcp__puppeteer__puppeteer_hover", "mcp__puppeteer__puppeteer_evaluate", "mcp__puppeteer__puppeteer_connect_active_tab"]
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash(npm:*)", "Bash(node:*)", "Bash(git init:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(pwd)", "Bash(cp:*)", "Bash(netstat:*)", "Bash(ss:*)", "Bash(ps:*)", "Bash(curl:*)", "Bash(kill:*)", "Bash(chmod:*)", "Bash(npx:*)", "Bash(rm:*)", "Bash(mv:*)", "Bash(touch:*)", "Bash(echo:*)", "Bash(sed:*)", "Bash(awk:*)", "Bash(env:*)", "Bash(export:*)", "Bash(bash:*)", "Bash(sh:*)", "Bash(python:*)", "Bash(python3:*)", "Bash(pip:*)", "Bash(pip3:*)", "Bash(which:*)", "Bash(find:*)", "Bash(xargs:*)", "Bash(lsof:*)", "Bash(pkill:*)", "Bash(date:*)", "Bash(sleep:*)", "mcp__puppeteer__puppeteer_navigate", "mcp__puppeteer__puppeteer_screenshot", "mcp__puppeteer__puppeteer_click", "mcp__puppeteer__puppeteer_fill", "mcp__puppeteer__puppeteer_select", "mcp__puppeteer__puppeteer_hover", "mcp__puppeteer__puppeteer_evaluate", "mcp__puppeteer__puppeteer_connect_active_tab"]
   }
 }
 EOF
@@ -140,7 +141,7 @@ EOF
 # 若檔案不存在 / JSON 解析失敗，python 會非零退出並把錯誤印到 stderr，
 # 呼叫端可用 || 分支判斷（見主流程）。
 count_remaining() {
-  python -c "import json; print(sum(1 for f in json.load(open('feature_list.json',encoding='utf-8')) if not f.get('passes',False)))"
+  python3 -c "import json; print(sum(1 for f in json.load(open('feature_list.json',encoding='utf-8')) if not f.get('passes',False)))"
 }
 
 # --- 主流程 ------------------------------------------------------------------
@@ -149,7 +150,7 @@ count_remaining() {
 cd "$PROJECT_DIR"
 
 echo "=============================================================="
-echo " 自主編碼 CLI 迴圈"
+echo " 自主編碼 CLI 迴圈（Linux 版）"
 echo "  專案目錄：$PROJECT_DIR"
 echo "  模型：$MODEL"
 echo "  最大 coding 迭代數：$MAX_ITER"
@@ -185,7 +186,7 @@ if [ ! -f "feature_list.json" ]; then
     # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
     _INIT_TMPOUT=$(mktemp /tmp/cc_init_XXXX.jsonl)
     DISABLE_WRITER_QA_HOOK=1 claude -p "Begin. Execute all initialization tasks now." \
-      --system-prompt-file "$INITIALIZER_PROMPT_WIN" \
+      --system-prompt-file "$INITIALIZER_PROMPT" \
       --model "$MODEL" \
       --permission-mode bypassPermissions \
       --max-turns 200 \
@@ -197,9 +198,9 @@ if [ ! -f "feature_list.json" ]; then
     # tail -f 只有在嘗試寫新資料時才收 SIGPIPE；session 結束後若無新資料，
     # tail 永遠不退出，整個 pipeline 因此 deadlock。
     # 改用 poll_file 模式直接讀檔，根本消除 deadlock。
-    # _INIT_TMPOUT 是 MSYS2 風格路徑（/tmp/...），Windows 原生 Python 需 cygpath -w 轉換。
+    # Linux 路徑可直接傳給 python3。
     set +e
-    PYTHONUTF8=1 python "$PARSER_PATH" "$(cygpath -w "$_INIT_TMPOUT" 2>/dev/null || echo "$_INIT_TMPOUT")"
+    python3 "$PARSER_PATH" "$_INIT_TMPOUT"
     _INIT_PEXIT=$?
     set -e
     kill "$_INIT_CPID" 2>/dev/null; wait "$_INIT_CPID" 2>/dev/null || true
@@ -284,7 +285,7 @@ for i in $(seq 1 "$MAX_ITER"); do
   # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
   _CODING_TMPOUT=$(mktemp /tmp/cc_coding_XXXX.jsonl)
   DISABLE_WRITER_QA_HOOK=1 claude -p "Continue. Execute your coding task now." \
-    --system-prompt-file "$CODING_PROMPT_WIN" \
+    --system-prompt-file "$CODING_PROMPT" \
     --model "$MODEL" \
     --permission-mode bypassPermissions \
     --max-turns 200 \
@@ -296,9 +297,9 @@ for i in $(seq 1 "$MAX_ITER"); do
   # tail -f 只有在嘗試寫新資料時才收 SIGPIPE；session 結束後若無新資料，
   # tail 永遠不退出，整個 pipeline 因此 deadlock。
   # 改用 poll_file 模式直接讀檔，根本消除 deadlock。
-  # _CODING_TMPOUT 是 MSYS2 風格路徑（/tmp/...），Windows 原生 Python 需 cygpath -w 轉換。
+  # Linux 路徑可直接傳給 python3。
   set +e
-  PYTHONUTF8=1 python "$PARSER_PATH" "$(cygpath -w "$_CODING_TMPOUT" 2>/dev/null || echo "$_CODING_TMPOUT")"
+  python3 "$PARSER_PATH" "$_CODING_TMPOUT"
   _CODING_PEXIT=$?
   set -e
   kill "$_CODING_CPID" 2>/dev/null; wait "$_CODING_CPID" 2>/dev/null || true

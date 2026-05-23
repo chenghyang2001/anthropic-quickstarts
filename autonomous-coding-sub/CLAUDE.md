@@ -56,11 +56,15 @@ DISABLE_WRITER_QA_HOOK=1 PYTHONUTF8=1 \
 
 ## 已知議題（重要 — 開工前讀）
 
-### 議題 1：bash 版 0/N features 通過（5/23 演練實證）
+### 議題 1：bash 版 0/N features 通過（5/23 演練實證）— ✅ 已修復
 
 `.claude/settings.json` 的 `permissions.allow` 沒包 `mcp__chrome-devtools__*` 或 `mcp__puppeteer__*`，agent 想驗 UI 時被擋 → 改不動 `feature_list.json` → stall detection 自動 abort。
 
-**修法**：把 bash 腳本的 settings.json allow list 補上 puppeteer MCP（參考 Python 版 `client.py:19-27` 的 `PUPPETEER_TOOLS` 清單）+ spawn `npx puppeteer-mcp-server` 在 bash 啟動時。
+**修法（2026-05-23 已實作）**：
+1. `autonomous_cli_loop.sh` line 112-119：settings.json allow list 已補上 8 個 puppeteer MCP 工具（navigate / screenshot / click / fill / select / hover / evaluate / connect_active_tab）
+2. `.mcp.json` line 121-134：已宣告 puppeteer MCP server（`npx puppeteer-mcp-server`），claude CLI 偵測後自動 spawn
+3. `prompts/coding_prompt.md` line 166-176：擴充工具清單說明，加入明確禁用 connect_active_tab 指示
+4. `prompts/initializer_prompt.md` line 47-55：新增「Testing Approach」段落，強制要求所有測試用 puppeteer + 禁用 connect_active_tab
 
 ### 議題 2：Windows Python SDK「Stream closed」不穩
 
