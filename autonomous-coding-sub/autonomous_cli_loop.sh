@@ -51,6 +51,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PROMPTS_DIR="$SCRIPT_DIR/prompts"
 PROJECT_DIR="$SCRIPT_DIR/generations/$PROJECT_NAME"
+# Git Bash 的 /c/Users/... 路徑直接餵 Windows Python 會變成 C:\c\Users\...，必須 cygpath -w 轉成 Windows 風格
+PARSER_PATH="$(cygpath -w "$SCRIPT_DIR/scripts/parse_claude_stream.py" 2>/dev/null || echo "$SCRIPT_DIR/scripts/parse_claude_stream.py")"
 
 # --- 前置檢查（preflight） ---------------------------------------------------
 # 任一硬性檢查失敗：印繁中錯誤訊息到 stderr 並 exit 1。
@@ -150,7 +152,7 @@ if [ ! -f "feature_list.json" ]; then
   if [ "$DRY_RUN" = "1" ]; then
     # 用文字描述而非顯示含 < 重導向的指令：若直接把 "< '路徑'" 寫進 echo 字串，
     # 使用者整行複製貼上時 < 會被 shell 當成重導向而誤觸發。
-    echo "[DRY-RUN] 將執行 initializer session：DISABLE_WRITER_QA_HOOK=1 claude -p（model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/initializer_prompt.md 以 stdin 讀入 prompt）"
+    echo "[DRY-RUN] 將執行 initializer session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/initializer_prompt.md 以 stdin 讀入 prompt）"
   else
     # prompt 用 stdin 重導向餵入，不當命令列參數：
     # Git Bash（MSYS2）命令列長度上限約 32KB，prompt 檔變長時用 "$(cat ...)"
@@ -160,11 +162,19 @@ if [ ! -f "feature_list.json" ]; then
     # 用 if ! ... 包裹的理由：if 條件位置的指令不受 set -e 中止，
     # 因此 claude 非零退出時能落到 then 分支印診斷訊息再 exit，
     # 而不是被 set -e 直接 silent exit、讓使用者隔天看不出跑到第幾圈。
+    #
+    # --output-format stream-json --verbose：讓 claude 印 JSONL 事件流
+    # （含 tool_use / tool_result / text block），透過 pipe 餵給 Python parser
+    # 翻成可讀的 [Tool: ...] / [OK] / > text 行。
+    # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
     if ! DISABLE_WRITER_QA_HOOK=1 claude -p \
       --model "$MODEL" \
       --permission-mode acceptEdits \
       --max-turns 200 \
-      < "$PROMPTS_DIR/initializer_prompt.md"; then
+      --output-format stream-json \
+      --verbose \
+      < "$PROMPTS_DIR/initializer_prompt.md" \
+      | PYTHONUTF8=1 python "$PARSER_PATH"; then
       echo "錯誤：initializer session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。中止迴圈。" >&2
       exit 1
     fi
@@ -193,7 +203,7 @@ for i in $(seq 1 "$MAX_ITER"); do
     echo ""
     echo "--- coding 迴圈（DRY-RUN 示意，不讀 feature_list.json） ---"
     # 用文字描述而非顯示含 < 重導向的指令：避免使用者整行複製貼上時誤觸發。
-    echo "[DRY-RUN] 將執行 coding session：DISABLE_WRITER_QA_HOOK=1 claude -p（model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/coding_prompt.md 以 stdin 讀入 prompt）"
+    echo "[DRY-RUN] 將執行 coding session：DISABLE_WRITER_QA_HOOK=1 claude -p （含 stream-json verbose + Python parser，model=$MODEL，permission-mode acceptEdits，max-turns 200，從 $PROMPTS_DIR/coding_prompt.md 以 stdin 讀入 prompt）"
     # 乾跑時不真的跑迴圈，印一次示意指令後即跳出。
     break
   fi
@@ -240,11 +250,19 @@ for i in $(seq 1 "$MAX_ITER"); do
   # 用 if ! ... 包裹的理由：if 條件位置的指令不受 set -e 中止，
   # 因此 claude 非零退出時能落到 then 分支印診斷訊息再 exit，
   # 而不是被 set -e 直接 silent exit、讓使用者隔天看不出跑到第幾圈。
+  #
+  # --output-format stream-json --verbose：讓 claude 印 JSONL 事件流
+  # （含 tool_use / tool_result / text block），透過 pipe 餵給 Python parser
+  # 翻成可讀的 [Tool: ...] / [OK] / > text 行。
+  # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
   if ! DISABLE_WRITER_QA_HOOK=1 claude -p \
     --model "$MODEL" \
     --permission-mode acceptEdits \
     --max-turns 200 \
-    < "$PROMPTS_DIR/coding_prompt.md"; then
+    --output-format stream-json \
+    --verbose \
+    < "$PROMPTS_DIR/coding_prompt.md" \
+    | PYTHONUTF8=1 python "$PARSER_PATH"; then
     echo "錯誤：第 $i 圈 coding session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。剩餘 $remaining 個 feature，中止迴圈。" >&2
     exit 1
   fi
