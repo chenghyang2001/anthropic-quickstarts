@@ -183,14 +183,21 @@ if [ ! -f "feature_list.json" ]; then
     # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
     #
     # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
-    if ! DISABLE_WRITER_QA_HOOK=1 claude -p "Begin. Execute all initialization tasks now." \
+    _INIT_FIFO=$(mktemp -u /tmp/cc_init_XXXX)
+    mkfifo "$_INIT_FIFO"
+    DISABLE_WRITER_QA_HOOK=1 claude -p "Begin. Execute all initialization tasks now." \
       --system-prompt-file "$INITIALIZER_PROMPT_WIN" \
       --model "$MODEL" \
       --permission-mode bypassPermissions \
       --max-turns 200 \
       --output-format stream-json \
       --verbose \
-      | PYTHONUTF8=1 python "$PARSER_PATH"; then
+      > "$_INIT_FIFO" &
+    _INIT_CPID=$!
+    PYTHONUTF8=1 python "$PARSER_PATH" < "$_INIT_FIFO"; _INIT_PEXIT=$?
+    rm -f "$_INIT_FIFO"
+    kill "$_INIT_CPID" 2>/dev/null; wait "$_INIT_CPID" 2>/dev/null || true
+    if [ $_INIT_PEXIT -ne 0 ]; then
       echo "錯誤：initializer session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。中止迴圈。" >&2
       exit 1
     fi
@@ -268,14 +275,21 @@ for i in $(seq 1 "$MAX_ITER"); do
   # set -o pipefail 已在腳本頂層設定，pipe 中任一段非零退出都會被 if ! 捕獲。
   #
   # --system-prompt-file：把 prompt 放 system 位置，避免 model 把角色設定當 user message 問「你想做什麼」。
-  if ! DISABLE_WRITER_QA_HOOK=1 claude -p "Continue. Execute your coding task now." \
+  _CODING_FIFO=$(mktemp -u /tmp/cc_coding_XXXX)
+  mkfifo "$_CODING_FIFO"
+  DISABLE_WRITER_QA_HOOK=1 claude -p "Continue. Execute your coding task now." \
     --system-prompt-file "$CODING_PROMPT_WIN" \
     --model "$MODEL" \
     --permission-mode bypassPermissions \
     --max-turns 200 \
     --output-format stream-json \
     --verbose \
-    | PYTHONUTF8=1 python "$PARSER_PATH"; then
+    > "$_CODING_FIFO" &
+  _CODING_CPID=$!
+  PYTHONUTF8=1 python "$PARSER_PATH" < "$_CODING_FIFO"; _CODING_PEXIT=$?
+  rm -f "$_CODING_FIFO"
+  kill "$_CODING_CPID" 2>/dev/null; wait "$_CODING_CPID" 2>/dev/null || true
+  if [ $_CODING_PEXIT -ne 0 ]; then
     echo "錯誤：第 $i 圈 coding session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。剩餘 $remaining 個 feature，中止迴圈。" >&2
     exit 1
   fi

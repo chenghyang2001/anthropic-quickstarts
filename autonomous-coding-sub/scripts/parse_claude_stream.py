@@ -100,7 +100,11 @@ def main() -> None:
             handle_user(msg)
         elif msg_type == "result":
             handle_result(msg)
+            return  # exit 0: session complete, unblocks FIFO pipe
         # system / 其他類型忽略（system 含 init/session info，太雜不印）
+
+    # stdin 關閉但未收到 result event = claude 崩潰或被 kill
+    sys.exit(1)
 
 
 if __name__ == "__main__":
