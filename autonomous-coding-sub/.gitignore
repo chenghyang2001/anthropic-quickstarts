@@ -5,3 +5,6 @@ generations/
 logs/
 *.log
 *_run.log
+
+# Local Claude Code session state
+.claude/
