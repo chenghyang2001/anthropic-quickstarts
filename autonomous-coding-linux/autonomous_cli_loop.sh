@@ -215,7 +215,7 @@ if [ ! -f "feature_list.json" ]; then
     python3 "$PARSER_PATH" "$_INIT_TMPOUT"
     _INIT_PEXIT=$?
     set -e
-    kill "$_INIT_CPID" 2>/dev/null; wait "$_INIT_CPID" 2>/dev/null || true
+    kill "$_INIT_CPID" 2>/dev/null || true; wait "$_INIT_CPID" 2>/dev/null || true
     rm -f "$_INIT_TMPOUT"
     rm -f "$_INIT_PROMPT_TMP"
     if [ $_INIT_PEXIT -ne 0 ]; then
@@ -315,7 +315,7 @@ for i in $(seq 1 "$MAX_ITER"); do
   python3 "$PARSER_PATH" "$_CODING_TMPOUT"
   _CODING_PEXIT=$?
   set -e
-  kill "$_CODING_CPID" 2>/dev/null; wait "$_CODING_CPID" 2>/dev/null || true
+  kill "$_CODING_CPID" 2>/dev/null || true; wait "$_CODING_CPID" 2>/dev/null || true
   rm -f "$_CODING_TMPOUT"
   if [ $_CODING_PEXIT -ne 0 ]; then
     echo "錯誤：第 $i 圈 coding session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。剩餘 $remaining 個 feature，中止迴圈。" >&2
