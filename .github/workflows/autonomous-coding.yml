@@ -1,0 +1,109 @@
+name: Autonomous Coding
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: 'Project name (generations/ subdirectory)'
+        required: true
+        default: 'ci_run'
+      max_iter:
+        description: 'Max coding iterations (sessions after initializer)'
+        required: true
+        default: '5'
+      num_features:
+        description: 'Number of end-to-end test cases to generate'
+        required: true
+        default: '2'
+      model:
+        description: 'Claude model override'
+        required: false
+        default: 'claude-sonnet-4-5-20250929'
+
+jobs:
+  autonomous-coding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Setup Chromium for puppeteer (no-sandbox CI mode)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y chromium-browser
+          CHROMIUM_BIN=$(which chromium-browser 2>/dev/null || which chromium 2>/dev/null)
+          # Create wrapper that adds --no-sandbox (required in CI, no setuid)
+          sudo tee /usr/local/bin/chromium-ci > /dev/null <<WRAPPER
+          #!/bin/bash
+          exec "$CHROMIUM_BIN" --no-sandbox --disable-setuid-sandbox "\$@"
+          WRAPPER
+          sudo chmod +x /usr/local/bin/chromium-ci
+          echo "PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium-ci" >> "$GITHUB_ENV"
+          echo "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true" >> "$GITHUB_ENV"
+
+      - name: Inject Claude OAuth credentials
+        run: |
+          mkdir -p ~/.claude
+          printf '%s' '${{ secrets.CLAUDE_CREDENTIALS }}' > ~/.claude/.credentials.json
+          chmod 600 ~/.claude/.credentials.json
+
+      - name: Verify claude CLI
+        run: claude --version
+
+      - name: Run autonomous coding harness
+        env:
+          DISABLE_WRITER_QA_HOOK: '1'
+          MODEL: ${{ inputs.model }}
+        run: |
+          cd autonomous-coding-linux
+          bash autonomous_cli_loop.sh \
+            "${{ inputs.project_name }}" \
+            "${{ inputs.max_iter }}" \
+            "${{ inputs.num_features }}"
+
+      - name: Show feature results
+        if: always()
+        run: |
+          PROJ="autonomous-coding-linux/generations/${{ inputs.project_name }}"
+          if [ -f "$PROJ/feature_list.json" ]; then
+            echo "=== Feature Results ==="
+            python3 - <<'PYEOF'
+          import json, sys
+          proj = "autonomous-coding-linux/generations/${{ inputs.project_name }}"
+          with open(f"{proj}/feature_list.json", encoding="utf-8") as f:
+              features = json.load(f)
+          passed = sum(1 for feat in features if feat.get("passes"))
+          total = len(features)
+          print(f"Passed: {passed}/{total}")
+          for i, feat in enumerate(features):
+              status = "PASS" if feat.get("passes") else "FAIL"
+              print(f"  [{status}] Feature {i+1}: {feat['description'][:80]}")
+          sys.exit(0 if passed == total else 1)
+          PYEOF
+          else
+            echo "feature_list.json not found — initializer may have failed"
+          fi
+
+      - name: Upload generated app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-app-${{ inputs.project_name }}-${{ github.run_number }}
+          path: autonomous-coding-linux/generations/${{ inputs.project_name }}/
+          retention-days: 30
+          if-no-files-found: warn
