@@ -21,7 +21,7 @@ before proceeding.
 
 ### CRITICAL FIRST TASK: Create feature_list.json
 
-Based on `app_spec.txt`, create a file called `feature_list.json` with 5 detailed
+Based on `app_spec.txt`, create a file called `feature_list.json` with __NUM_FEATURES__ detailed
 end-to-end test cases. This file is the single source of truth for what
 needs to be built.
 
@@ -54,7 +54,7 @@ needs to be built.
 
 **Requirements for feature_list.json:**
 
-- Minimum 5 features total with testing steps for each
+- EXACTLY __NUM_FEATURES__ features total (no more, no less)
 - Both "functional" and "style" categories
 - Mix of narrow tests (2-5 steps) and comprehensive tests (10+ steps)
 - At least 1 test MUST have 10+ steps
@@ -91,7 +91,7 @@ Base the script on the technology stack specified in `app_spec.txt`.
 
 Create a git repository and make your first commit with:
 
-- feature_list.json (complete with all 5 features)
+- feature_list.json (complete with all __NUM_FEATURES__ features)
 - init.sh (environment setup script)
 - README.md (project overview and setup instructions)
 

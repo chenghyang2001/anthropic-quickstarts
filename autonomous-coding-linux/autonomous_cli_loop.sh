@@ -32,6 +32,9 @@ PROJECT_NAME="${1:-cli_demo}"
 # $2：coding 迴圈最大迭代數（initializer session 不計入），預設 30
 MAX_ITER="${2:-30}"
 
+# $3：initializer 產生的端對端測試案例數量（feature_list.json），預設 5
+NUM_FEATURES="${3:-5}"
+
 # 模型：可用環境變數 MODEL 覆寫，否則用 Sonnet 4.5
 MODEL="${MODEL:-claude-sonnet-4-5-20250929}"
 
@@ -55,7 +58,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPTS_DIR="$SCRIPT_DIR/prompts"
 PROJECT_DIR="$SCRIPT_DIR/generations/$PROJECT_NAME"
 PARSER_PATH="$SCRIPT_DIR/scripts/parse_claude_stream.py"
-INITIALIZER_PROMPT="$PROMPTS_DIR/initializer_prompt.md"
+_INIT_PROMPT_TMP=$(mktemp /tmp/cc_initprompt_XXXX.md)
+sed "s/__NUM_FEATURES__/$NUM_FEATURES/g" "$PROMPTS_DIR/initializer_prompt.md" > "$_INIT_PROMPT_TMP"
+INITIALIZER_PROMPT="$_INIT_PROMPT_TMP"
 CODING_PROMPT="$PROMPTS_DIR/coding_prompt.md"
 
 # --- 前置檢查（preflight） ---------------------------------------------------
@@ -212,6 +217,7 @@ if [ ! -f "feature_list.json" ]; then
     set -e
     kill "$_INIT_CPID" 2>/dev/null; wait "$_INIT_CPID" 2>/dev/null || true
     rm -f "$_INIT_TMPOUT"
+    rm -f "$_INIT_PROMPT_TMP"
     if [ $_INIT_PEXIT -ne 0 ]; then
       echo "錯誤：initializer session 非零退出（可能 rate limit / max-turns 耗盡 / auth 過期 / 網路中斷）。中止迴圈。" >&2
       exit 1
