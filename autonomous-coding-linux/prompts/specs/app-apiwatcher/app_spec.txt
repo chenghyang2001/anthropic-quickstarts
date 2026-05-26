@@ -1,0 +1,469 @@
+<project_specification>
+  <project_name>APIWatcher — REST API Endpoint Monitor</project_name>
+
+  <overview>
+    APIWatcher is a lightweight web-based monitoring tool that continuously checks REST API
+    endpoints for availability, correctness, and performance. A background scheduler runs
+    configurable health checks and records results to SQLite, while a Streamlit dashboard
+    visualizes uptime, response time trends, and incident history in real time. When Claude
+    detects anomaly patterns across check history, it generates plain-English incident reports
+    and suggests probable root causes. Teams can monitor development, staging, and production
+    environments from a single dashboard.
+  </overview>
+
+  <technology_stack>
+    <api_key>
+        You can use an API key located at /tmp/api-key for testing. You will not be allowed to read this file, but you can reference it in code.
+    </api_key>
+    <backend>
+      <language>Python 3.11+</language>
+      <framework>FastAPI (background service + REST config API)</framework>
+      <scheduler>APScheduler 3.x (AsyncIOScheduler)</scheduler>
+      <http_client>httpx (async)</http_client>
+      <database>SQLite via SQLAlchemy 2.x</database>
+      <port>FastAPI service runs on port 8000</port>
+    </backend>
+    <frontend>
+      <framework>Streamlit</framework>
+      <charts>Plotly Express</charts>
+      <port>Streamlit dashboard runs on port 8501</port>
+    </frontend>
+    <ai>
+      <model>Anthropic Claude API (claude-sonnet-4-6)</model>
+    </ai>
+    <notifications>
+      <email>smtplib with TLS support</email>
+      <slack>httpx Slack webhook</slack>
+      <desktop>plyer.notification</desktop>
+    </notifications>
+    <dependencies>
+      fastapi, streamlit, apscheduler, httpx, sqlalchemy, plotly, anthropic, uvicorn, plyer
+    </dependencies>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - ANTHROPIC_API_KEY environment variable must be set
+      - Python 3.11+ environment with pip
+      - SQLite database auto-created on first run
+      - FastAPI server starts on port 8000, Streamlit dashboard on port 8501
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    <endpoint_configuration>
+      - Add/edit/delete endpoints via Streamlit form or REST API (POST /endpoints)
+      - Fields: name, URL, HTTP method (GET/POST/PUT), headers (JSON), request body (JSON)
+      - Environment group assignment: dev / staging / production
+      - Enable/disable individual endpoints without deleting them
+      - Import/export endpoint configuration as YAML file
+    </endpoint_configuration>
+
+    <health_check_engine>
+      - APScheduler fires checks per endpoint at configured interval (60s to 86400s)
+      - Per-check validations:
+        - Status code matches expected value (default: 200)
+        - Response time below threshold (default: 2000ms)
+        - Response body contains required keyword (optional)
+        - Response JSON matches schema (optional jsonschema validation)
+      - Check result stored with: status, response_time_ms, status_code, error_message
+      - Async execution: all due checks fire concurrently with httpx AsyncClient
+    </health_check_engine>
+
+    <sla_uptime_tracking>
+      - Uptime % calculated over rolling windows: last 24h / 7d / 30d
+      - Formula: (passing_checks / total_checks) * 100 per endpoint per window
+      - SLA target configurable per endpoint (default: 99.9%)
+      - SLA breach indicator shown on dashboard grid
+      - Historical SLA CSV export per endpoint
+    </sla_uptime_tracking>
+
+    <incident_detection>
+      - Incident opened when: 3 consecutive check failures for same endpoint
+      - Incident fields: start_time, end_time, duration_minutes, failure_count, resolved_at
+      - Incident auto-closed when: 2 consecutive passing checks after incident start
+      - Incident severity: LOW (response slow), MEDIUM (partial failure), HIGH (complete down)
+      - Incident timeline view: shows check results during incident window
+    </incident_detection>
+
+    <claude_ai_incident_reports>
+      - On incident open: Claude called with last 20 check results as context
+      - Claude report template:
+        - What failed and for how long
+        - Last successful check timestamp
+        - Error pattern analysis (timeout vs 503 vs 400 etc.)
+        - 2-3 probable root causes with likelihood %
+        - Suggested immediate remediation steps
+      - Report stored in incidents table, viewable in Streamlit incident detail
+      - Manual Re-analyze button to refresh Claude report with latest data
+    </claude_ai_incident_reports>
+
+    <alert_channels>
+      - Email alert: SMTP with configurable from/to, TLS support, per-endpoint toggle
+      - Slack webhook: POST JSON payload with incident summary to webhook URL
+      - Desktop notification: plyer.notification for local development use
+      - Alert on: incident open, incident resolved, SLA breach
+      - Alert cooldown: minimum 15 minutes between repeat alerts for same endpoint
+      - Alert log: all sent alerts stored with timestamp, channel, message preview
+    </alert_channels>
+
+    <response_time_trend_chart>
+      - Plotly line chart: response_time_ms over last 24h per endpoint
+      - Overlay: threshold line (red dashed) at configured max response time
+      - Zoom, pan, hover tooltip with exact ms value
+      - Multi-endpoint overlay mode: compare endpoints on same chart
+      - Auto-refresh every 60 seconds via Streamlit st.rerun()
+    </response_time_trend_chart>
+
+    <multi_environment_dashboard>
+      - Environment selector: All / Dev / Staging / Production tabs
+      - Status grid: card per endpoint, color-coded green/yellow/red
+      - Summary row: total endpoints, passing, failing, in-incident per environment
+      - Filter by: status (up/down/degraded), SLA compliance, last incident time
+      - Bulk check now button: trigger immediate check for all endpoints in group
+    </multi_environment_dashboard>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <endpoints>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - name TEXT NOT NULL
+        - url TEXT NOT NULL
+        - method TEXT NOT NULL DEFAULT 'GET'
+        - headers TEXT DEFAULT '{}' (JSON string)
+        - body TEXT DEFAULT '{}' (JSON string)
+        - environment TEXT DEFAULT 'production'
+        - check_interval INTEGER DEFAULT 300 (seconds)
+        - timeout_ms INTEGER DEFAULT 5000
+        - expected_status INTEGER DEFAULT 200
+        - keyword_check TEXT (optional keyword in response body)
+        - sla_target REAL DEFAULT 99.9
+        - enabled BOOLEAN DEFAULT 1
+        - created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      </endpoints>
+
+      <checks>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - endpoint_id INTEGER NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE
+        - checked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        - passed BOOLEAN NOT NULL
+        - status_code INTEGER
+        - response_time INTEGER (milliseconds)
+        - error_message TEXT
+        - response_body TEXT (truncated to 500 chars)
+      </checks>
+
+      <incidents>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - endpoint_id INTEGER NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE
+        - started_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        - resolved_at DATETIME
+        - duration_mins INTEGER
+        - failure_count INTEGER DEFAULT 1
+        - severity TEXT DEFAULT 'MEDIUM' (LOW | MEDIUM | HIGH)
+        - claude_report TEXT
+        - acknowledged BOOLEAN DEFAULT 0
+      </incidents>
+
+      <alert_configs>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - endpoint_id INTEGER REFERENCES endpoints(id) ON DELETE CASCADE
+        - channel TEXT NOT NULL (email | slack | desktop)
+        - target TEXT NOT NULL (email address or webhook URL)
+        - on_incident BOOLEAN DEFAULT 1
+        - on_resolve BOOLEAN DEFAULT 1
+        - on_sla_breach BOOLEAN DEFAULT 1
+        - cooldown_mins INTEGER DEFAULT 15
+        - last_sent_at DATETIME
+      </alert_configs>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <endpoints_config>
+      - GET /endpoints (list all configured endpoints)
+      - POST /endpoints (add new endpoint)
+      - GET /endpoints/:id (get endpoint details)
+      - PUT /endpoints/:id (update endpoint configuration)
+      - DELETE /endpoints/:id (remove endpoint)
+      - POST /endpoints/:id/check (trigger immediate manual check)
+      - PUT /endpoints/:id/toggle (enable/disable endpoint)
+      - GET /endpoints/export (export all endpoints as YAML)
+      - POST /endpoints/import (import endpoints from YAML)
+    </endpoints_config>
+
+    <checks>
+      - GET /checks/:endpoint_id (get check history, paginated)
+      - GET /checks/:endpoint_id/latest (get most recent check result)
+    </checks>
+
+    <incidents>
+      - GET /incidents (list all incidents, optional filter: open/resolved)
+      - GET /incidents/:id (get incident detail with Claude report)
+      - PUT /incidents/:id/acknowledge (mark incident as acknowledged)
+      - POST /incidents/:id/reanalyze (trigger new Claude AI analysis)
+    </incidents>
+
+    <sla>
+      - GET /sla/:endpoint_id (get SLA metrics: 24h/7d/30d uptime %)
+      - GET /sla/:endpoint_id/export (export SLA history as CSV)
+    </sla>
+
+    <alerts>
+      - GET /alerts (get alert send log)
+      - GET /alert-configs/:endpoint_id (get alert configuration for endpoint)
+      - PUT /alert-configs/:endpoint_id (update alert configuration)
+    </alerts>
+
+    <health>
+      - GET /health (service health check endpoint)
+    </health>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Two-process architecture: FastAPI (:8000) + Streamlit (:8501) share SQLite DB
+      - Streamlit reads DB directly; writes go through FastAPI REST API
+      - Auto-refresh every 60 seconds via st.rerun()
+      - Environment tabs at top: All / Dev / Staging / Production
+    </main_structure>
+
+    <dashboard_header>
+      - APIWatcher title with environment tab selector
+      - Summary metrics bar: total endpoints / UP count / Degraded count / Down count
+      - Bulk check now button (triggers immediate check for all in current env tab)
+    </dashboard_header>
+
+    <status_grid>
+      - st.columns(3): three endpoint cards per row
+      - Color-coded card: green border (passing) / yellow (degraded) / red (down/incident)
+      - Card content: endpoint name, 24h uptime %, average response time ms, incident badge
+      - Click card to expand endpoint detail sidebar
+    </status_grid>
+
+    <response_time_chart>
+      - Plotly line chart: response_time_ms over last 24h per endpoint (st.plotly_chart)
+      - Red dashed horizontal threshold line at configured max response time
+      - Zoom / pan / hover tooltip showing exact ms value and timestamp
+      - Multi-endpoint overlay mode: toggle endpoints on/off in legend
+    </response_time_chart>
+
+    <incident_log>
+      - Right column panel showing open incidents and last 5 resolved
+      - Per incident: endpoint name, started_at, duration_mins, severity badge color
+      - st.expander: View Claude Report opens AI analysis text
+      - Acknowledge button (grayed out after acknowledgement)
+    </incident_log>
+
+    <endpoint_detail_sidebar>
+      - SLA metrics section: st.metric for 24h / 7d / 30d uptime %
+      - Response time histogram (Plotly bar chart)
+      - Check history table: paginated 50 rows per page (st.dataframe)
+      - Claude incident report block (if exists for active incident)
+      - Alert configuration form: channel, target, toggle on_incident/on_resolve/on_sla_breach
+    </endpoint_detail_sidebar>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Status UP: Green (#22C55E)
+      - Status Degraded: Amber (#F59E0B)
+      - Status Down / Active Incident: Red (#EF4444)
+      - Severity LOW badge: Blue (#3B82F6)
+      - Severity MEDIUM badge: Orange (#F97316)
+      - Severity HIGH badge: Red (#EF4444)
+      - Chart threshold line: Red dashed (#EF4444)
+      - Background: Streamlit default (light or dark theme)
+    </color_palette>
+
+    <typography>
+      - Streamlit default sans-serif system font
+      - Uptime % and response time: st.metric (large bold value, small label)
+      - Incident report body: readable prose, no technical jargon
+      - JSON/code values: st.code with monospace font
+    </typography>
+
+    <components>
+      <status_card>
+        - Color-coded left border or background tint based on status
+        - Uptime % as primary metric (large)
+        - Average response time below as secondary metric
+        - Active incident overlay badge (red pill)
+      </status_card>
+
+      <chart>
+        - Plotly Express line chart with dark/light theme match
+        - Threshold overlay as add_hline red dashed
+        - Hover tooltip: timestamp + ms value
+        - Multi-endpoint: distinct colors per line, toggle via legend
+      </chart>
+
+      <incident_card>
+        - Severity badge: colored pill (LOW/MEDIUM/HIGH)
+        - Duration displayed as X min or X hr Y min
+        - st.expander for Claude AI report (collapsed by default)
+        - Acknowledge button becomes disabled/checkmark after click
+      </incident_card>
+    </components>
+  </design_system>
+
+  <key_interactions>
+    <scheduled_check_execution>
+      1. APScheduler fires job for endpoint_id at configured interval
+      2. httpx.AsyncClient.request(method, url, headers, json, timeout) called
+      3. Response received — or exception caught (ConnectionError, TimeoutError)
+      4. Check result evaluated: status_code match, response_time threshold, keyword presence
+      5. checks row inserted to SQLite with passed/failed result
+      6. Incident logic: query last 3 checks — if all failed, open incident (if none open)
+      7. If last 2 passed and incident is open — close incident, set resolved_at, calc duration
+      8. If incident just opened → alerter.send_all(endpoint, incident) fires all configured channels
+      9. If incident just opened → claude_reporter.generate(endpoint, incident) called async non-blocking
+    </scheduled_check_execution>
+
+    <claude_incident_report_generation>
+      1. Incident opened for endpoint (e.g., "Payment Gateway")
+      2. Fetch last 20 check results from checks table ordered by id DESC
+      3. Build Claude prompt: endpoint name/URL, check history as JSON, analysis instructions
+      4. Anthropic SDK call to claude-sonnet-4-6 with timeout=30s, max_retries=2
+      5. Response text parsed and stored in incidents.claude_report column
+      6. Streamlit next 60s refresh reads updated incidents from DB
+      7. Incident card displays "AI Report Available" badge
+      8. User clicks View Claude Report to expand AI analysis in st.expander
+    </claude_incident_report_generation>
+
+    <streamlit_dashboard_refresh>
+      1. Streamlit script runs top-to-bottom on load and every 60s via st.rerun()
+      2. Reads all endpoints + latest check per endpoint from SQLite
+      3. Renders environment tabs (All/Dev/Staging/Production) and summary metrics
+      4. Renders status grid: 3-column layout with color-coded cards
+      5. Renders Plotly response time chart (last 24h data from checks table)
+      6. Renders incident log panel (open + last 5 resolved, with Claude reports)
+      7. User clicks endpoint card → session_state stores selected_endpoint_id
+      8. Detail sidebar renders with SLA metrics, check history, alert config form
+    </streamlit_dashboard_refresh>
+  </key_interactions>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Project Structure and Database Layer</title>
+      <tasks>
+        - Create watcher/ package with modules: models.py, db.py, scheduler.py, checker.py, incident.py, alerter.py, claude_reporter.py, api.py, dashboard.py
+        - Define SQLAlchemy ORM models for all 4 tables (endpoints, checks, incidents, alert_configs)
+        - Create engine with check_same_thread=False for concurrent access from scheduler + API
+        - Write db.py session factory using contextmanager with try/finally close pattern
+        - Initialize SQLite DB on startup with Base.metadata.create_all(engine)
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>HTTP Checker and Scheduler</title>
+      <tasks>
+        - checker.py: async function run_check(endpoint) -> CheckResult dataclass
+        - Handle all failure modes: ConnectionError, TimeoutError, status mismatch, keyword not found, JSON schema fail
+        - scheduler.py: AsyncIOScheduler, load all enabled endpoints from DB on startup
+        - Schedule each as IntervalTrigger(seconds=endpoint.check_interval) job
+        - Expose add_job / remove_job / update_job functions for use by FastAPI endpoints
+        - Re-load all jobs from DB on FastAPI restart (jobs are not persisted in APScheduler by default)
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>Incident Detection and Alert Logic</title>
+      <tasks>
+        - incident.py: evaluate_incident(endpoint_id, db_session) called after each check result saved
+        - Query last 3 checks: if all failed and no open incident → INSERT new incident, determine severity
+        - Query last 2 checks: if both passed and open incident exists → UPDATE resolved_at, duration_mins
+        - alerter.py: send_email() via smtplib STARTTLS, send_slack() via httpx POST, send_desktop() via plyer
+        - Enforce cooldown: compare now vs alert_configs.last_sent_at before sending
+        - Write all sent alerts to alert_log table with channel, target, message_preview, sent_at
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Claude AI Incident Reporter</title>
+      <tasks>
+        - claude_reporter.py: async generate_report(endpoint, incident, db_session)
+        - Fetch last 20 check rows for endpoint, format as JSON array (newest first)
+        - Build structured prompt requesting: failure summary, error pattern analysis, root causes with %, remediation steps
+        - Call Anthropic Python SDK with model=claude-sonnet-4-6, max_tokens=1024, timeout=30s
+        - Retry on API error up to 2 times with exponential backoff
+        - Store report string in incidents.claude_report via db UPDATE
+        - reanalyze: clear claude_report field, re-fetch latest checks, call generate_report again
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>FastAPI Service</title>
+      <tasks>
+        - api.py: full CRUD for /endpoints (list, create, read, update, delete, toggle, check-now)
+        - YAML import/export: parse with PyYAML, validate required fields before insert
+        - Incident routes: list (filter open/resolved), get detail, acknowledge, reanalyze
+        - SLA routes: calculate uptime windows, CSV export via StringIO
+        - Alert config routes: get and update per-endpoint alert settings
+        - FastAPI lifespan event: start APScheduler on startup, shutdown on stop
+        - Run with uvicorn on port 8000
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>SLA Calculation Module</title>
+      <tasks>
+        - sla.py: calculate_uptime(endpoint_id, window_hours, db_session) -> float
+        - Query checks WHERE checked_at >= now - window_hours AND endpoint_id = ?
+        - Return (COUNT(passed=True) / COUNT(*)) * 100, handle zero-division gracefully
+        - Detect SLA breach: compare result vs endpoint.sla_target
+        - CSV export: generate rows of date, uptime_24h, uptime_7d, uptime_30d per endpoint
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Streamlit Dashboard</title>
+      <tasks>
+        - dashboard.py: environment tabs via st.tabs([All, Dev, Staging, Production])
+        - Summary metrics row: st.metric for total / UP / Degraded / Down endpoint counts
+        - Status grid: st.columns(3) loop over endpoints, color-coded card via st.container + CSS
+        - Response time chart: px.line() with add_hline for threshold, st.plotly_chart(use_container_width=True)
+        - Incident log: right st.column with st.expander per incident for Claude report
+        - Endpoint detail: st.session_state stores selected endpoint, render sidebar panel on selection
+        - Auto-refresh: time.sleep(60) + st.rerun() at end of script
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>Polish and Testing</title>
+      <tasks>
+        - Unit tests: incident detection logic, SLA calculation accuracy, alert cooldown enforcement
+        - Integration test: mock httpx endpoint, run full check cycle, verify DB state
+        - Seed script: insert 5 sample endpoints (mix of passing/failing) for demo and development
+        - README: document required env vars, startup commands, architecture diagram
+        - init.sh: install dependencies, start FastAPI with uvicorn, start Streamlit in background
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - 50 endpoints checked concurrently with no missed intervals (async httpx)
+      - Incident opens within 3 failed checks (maximum 3 check intervals delay)
+      - Claude report generated within 10 seconds of incident open
+      - Email and Slack alerts fire within 5 seconds of incident detection
+      - SLA calculation matches manual count within 0.1% margin
+    </functionality>
+
+    <user_experience>
+      - Dashboard status grid refreshes without full page reload (60s interval via st.rerun)
+      - Endpoint detail panel opens within 500ms (SQLite local read)
+      - Claude incident report readable as standalone document with no technical jargon
+      - Check history table paginates 10,000+ rows without performance lag
+    </user_experience>
+
+    <technical_quality>
+      - All DB writes use SQLAlchemy sessions with try/finally close pattern
+      - httpx checks have explicit timeout set, no hanging connections possible
+      - APScheduler jobs survive FastAPI restart (re-loaded from DB on startup)
+      - Claude API key loaded exclusively from ANTHROPIC_API_KEY environment variable
+      - Unit tests cover: incident detection (3-fail open, 2-pass close), SLA formula, cooldown logic
+    </technical_quality>
+  </success_criteria>
+</project_specification>
