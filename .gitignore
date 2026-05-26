@@ -29,3 +29,6 @@ node_modules/
 # 演練產出（大型二進位 / 自動生成，不入版控）
 agents/doc/notebooklm/
 agents/summary.txt
+
+# Hook 自動更新的 session 狀態檔（每次觸發都變，不需版控）
+**/.claude/session-state.md
