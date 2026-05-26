@@ -1,0 +1,430 @@
+<project_specification>
+  <project_name>CodeReviewBot — AI-Powered Code Review Tool</project_name>
+
+  <overview>
+    CodeReviewBot is an AI-powered code review tool that combines a CLI interface with an optional
+    web dashboard. Developers run "codereview scan ./src" locally or point it at a GitHub PR, and
+    Claude returns structured findings (critical / warning / suggestion) with file-line context.
+    All findings are persisted in SQLite so teams can track quality trends over time.
+
+    Primary audience: Individual developers and small engineering teams wanting automated
+    pre-merge code review without sending code to a third-party SaaS.
+  </overview>
+
+  <technology_stack>
+    <api_key>
+        You can use an API key located at /tmp/api-key for testing. You will not be allowed to read this file, but you can reference it in code.
+    </api_key>
+    <cli>
+      <language>Python 3.11+</language>
+      <framework>Click 8</framework>
+      <terminal_output>Rich library (color-coded, progress bars)</terminal_output>
+    </cli>
+    <backend>
+      <framework>FastAPI 0.111</framework>
+      <port>FastAPI API server runs on port 8000</port>
+    </backend>
+    <frontend>
+      <framework>Streamlit 1.35</framework>
+      <port>Streamlit dashboard runs on port 8501</port>
+      <charts>Plotly Express</charts>
+    </frontend>
+    <ai>
+      <model>Anthropic Claude (claude-sonnet-4-6)</model>
+      <sdk>anthropic Python SDK</sdk>
+    </ai>
+    <github>
+      <library>PyGithub 2.3</library>
+      <auth>GITHUB_TOKEN environment variable</auth>
+    </github>
+    <database>
+      <engine>SQLite via SQLAlchemy 2.0</engine>
+      <migrations>Alembic</migrations>
+    </database>
+    <config>
+      <yaml>PyYAML</yaml>
+      <env>python-dotenv</env>
+    </config>
+    <export>
+      <markdown>built-in string formatting</markdown>
+      <templates>Jinja2</templates>
+    </export>
+    <dependencies>
+      click, fastapi, uvicorn, streamlit, anthropic, pygithub, sqlalchemy, alembic,
+      pyyaml, python-dotenv, rich, tqdm, jinja2, pydantic, plotly, smtplib
+    </dependencies>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - ANTHROPIC_API_KEY environment variable must be set
+      - GITHUB_TOKEN environment variable required for GitHub PR integration
+      - Python 3.11+ environment with pip
+      - SQLite database auto-created on first run via Alembic migrations
+      - FastAPI server starts on port 8000, Streamlit dashboard on port 8501
+      - CLI available via: python -m codereviewbot (or after pip install -e .)
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    <local_file_scanner>
+      - Recursively scan a directory for Python, TypeScript, and Go source files
+      - Respect .codereviewbotignore patterns (same syntax as .gitignore)
+      - Chunk large files into overlapping segments (max 200 lines, 20-line overlap) before sending to Claude
+      - Display real-time progress bar (tqdm) as files are processed
+      - CLI command: codereview scan ./src --config .codereviewbot.yaml
+    </local_file_scanner>
+
+    <github_pr_integration>
+      - Authenticate via GITHUB_TOKEN environment variable
+      - Fetch PR diff using PyGithub, reconstruct per-file diffs
+      - Post review findings as inline PR comments via GitHub Review API
+      - Support --dry-run flag to preview comments without posting
+      - CLI command: codereview pr --repo owner/repo --pr 42
+    </github_pr_integration>
+
+    <severity_classification>
+      - Claude returns structured JSON: findings array with severity, line, message, suggestion fields
+      - Three severity levels: critical (blocks merge), warning (should fix), suggestion (optional)
+      - CLI exit code 1 if any critical findings exist (suitable for CI gates)
+      - Color-coded terminal output using Rich library
+    </severity_classification>
+
+    <review_history_storage>
+      - Every scan result saved to SQLite with timestamp and repo context
+      - Query history: codereview history --repo myrepo --last 30d
+      - Diff two reviews to see quality improvement over time
+      - Pruning command: codereview history prune --older-than 90d
+    </review_history_storage>
+
+    <streamlit_dashboard>
+      - Summary cards: total findings by severity this week
+      - Line chart: findings over time (critical trend) via Plotly
+      - Table: top 10 files with most findings in current week
+      - Team statistics: findings per author (from git blame data)
+      - Filter by repo, date range, severity, author
+    </streamlit_dashboard>
+
+    <configurable_rules>
+      - .codereviewbot.yaml at project root defines focus areas
+      - Enable/disable rule categories: security, performance, style, logic
+      - Custom prompt additions: "Also check for use of deprecated requests patterns"
+      - Per-language settings (Go-specific idioms, Python type-hint enforcement)
+    </configurable_rules>
+
+    <export_reporting>
+      - codereview report --format markdown — full Markdown report to stdout
+      - codereview report --format github-comment — post summary comment to PR
+      - Report includes: file list, finding count by severity, top issues, remediation hints
+      - Scheduled reports via cron: weekly digest email via smtplib
+    </export_reporting>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <reviews>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - repo_name TEXT NOT NULL
+        - branch TEXT
+        - pr_number INTEGER
+        - scan_type TEXT NOT NULL (local | github_pr)
+        - started_at DATETIME NOT NULL
+        - finished_at DATETIME
+        - total_files INTEGER DEFAULT 0
+        - created_by TEXT (git user or system)
+      </reviews>
+
+      <findings>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - review_id INTEGER NOT NULL REFERENCES reviews(id)
+        - file_path TEXT NOT NULL
+        - line_start INTEGER
+        - line_end INTEGER
+        - severity TEXT NOT NULL (critical | warning | suggestion)
+        - category TEXT (security | performance | style | logic)
+        - message TEXT NOT NULL
+        - suggestion TEXT
+        - suppressed BOOLEAN DEFAULT 0 (user marked as false-positive)
+      </findings>
+
+      <repo_configs>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - repo_name TEXT UNIQUE NOT NULL
+        - config_yaml TEXT (serialized YAML content)
+        - updated_at DATETIME NOT NULL
+      </repo_configs>
+
+      <team_stats>
+        - id INTEGER PRIMARY KEY AUTOINCREMENT
+        - review_id INTEGER NOT NULL REFERENCES reviews(id)
+        - author TEXT NOT NULL
+        - file_path TEXT NOT NULL
+        - critical_count INTEGER DEFAULT 0
+        - warning_count INTEGER DEFAULT 0
+        - suggestion_count INTEGER DEFAULT 0
+      </team_stats>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <reviews>
+      - GET /api/reviews (list all reviews, filterable by repo/date/scan_type)
+      - GET /api/reviews/:id (get review detail with finding counts)
+      - POST /api/reviews (trigger a new scan — used by CLI internally)
+      - GET /api/reviews/:id/findings (get all findings for a review)
+      - GET /api/reviews/compare?a=:id1&b=:id2 (diff two reviews for improvement tracking)
+    </reviews>
+
+    <findings>
+      - GET /api/findings (list findings, filterable by severity/category/repo/date)
+      - PUT /api/findings/:id/suppress (mark finding as false-positive)
+      - GET /api/findings/top-files?repo=:name&days=7 (top 10 files with most findings)
+    </findings>
+
+    <stats>
+      - GET /api/stats/summary?repo=:name&days=7 (finding counts by severity for summary cards)
+      - GET /api/stats/trend?repo=:name&days=30 (daily finding counts for trend chart)
+      - GET /api/stats/team?repo=:name&days=7 (per-author breakdown for team tab)
+    </stats>
+
+    <config>
+      - GET /api/config/:repo_name (get stored repo config)
+      - PUT /api/config/:repo_name (upsert repo config YAML)
+    </config>
+
+    <health>
+      - GET /health (service health check)
+    </health>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Three interfaces: CLI (primary), FastAPI REST (:8000), Streamlit dashboard (:8501)
+      - CLI and FastAPI both read/write SQLite directly via SQLAlchemy
+      - Streamlit calls FastAPI REST endpoints for all data (no direct DB access)
+      - Dashboard has 3 tabs: Dashboard / Files / Team
+    </main_structure>
+
+    <cli_interface>
+      - Commands: scan, pr, history, report, config
+      - Rich progress bar while scanning files
+      - Rich table output: columns for file, line, severity (color-coded), message
+      - Exit code 0 if no critical findings, exit code 1 if any critical found
+      - --dry-run flag for PR commands (preview without posting)
+    </cli_interface>
+
+    <streamlit_dashboard_tab>
+      - Summary cards row: total critical / warning / suggestion this week (st.metric)
+      - Critical trend line chart: findings per day over selected date range (Plotly)
+      - Sidebar: repo selector, date range picker, severity filter, author filter
+    </streamlit_dashboard_tab>
+
+    <streamlit_files_tab>
+      - Top 10 files table: file path, finding counts by severity (st.dataframe)
+      - Click row to expand findings detail for that file
+      - Finding detail: line number, severity badge, message, suggested fix
+    </streamlit_files_tab>
+
+    <streamlit_team_tab>
+      - Per-author bar chart: critical/warning/suggestion breakdown (Plotly)
+      - Author table: sortable by total findings
+      - Sprint retrospective use: identify authors needing review mentoring
+    </streamlit_team_tab>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Critical severity: Red (#EF4444) in CLI Rich + Streamlit badges
+      - Warning severity: Amber (#F59E0B)
+      - Suggestion severity: Blue (#3B82F6)
+      - CLI background: respects terminal light/dark theme via Rich auto-detect
+      - Streamlit: default theme with severity-color badges
+    </color_palette>
+
+    <typography>
+      - CLI: Rich table with bold headers, colored severity text
+      - Streamlit: default sans-serif, st.metric for summary cards
+      - Finding messages: monospace for file paths and code snippets
+    </typography>
+
+    <components>
+      <cli_output>
+        - Rich Table: file | line | severity | category | message columns
+        - Rich Panel: scan summary box at completion
+        - Rich Progress: live progress bar during file scanning
+        - Color rules: critical=red bold, warning=yellow, suggestion=cyan
+      </cli_output>
+
+      <streamlit_card>
+        - st.metric for summary numbers with delta indicator (week-over-week)
+        - Severity badge: colored st.badge or styled markdown span
+        - Expandable finding detail: st.expander per file
+      </streamlit_card>
+
+      <plotly_chart>
+        - Line chart for trend: x=date, y=finding_count, color=severity
+        - Bar chart for team: x=author, y=count, color=severity (stacked)
+        - Hover tooltip: exact date and count values
+      </plotly_chart>
+    </components>
+  </design_system>
+
+  <key_interactions>
+    <local_scan_cli>
+      1. Developer runs: codereview scan ./src --config .codereviewbot.yaml
+      2. CLI discovers all .py, .ts, .go files respecting .codereviewbotignore
+      3. ReviewEngine splits each file into max 200-line chunks with 20-line overlap
+      4. For each chunk, Claude API called with system prompt + code + focus rules from config
+      5. Claude returns JSON: {"findings": [{"severity", "line", "message", "suggestion", "category"}]}
+      6. Pydantic validates JSON response before DB write
+      7. Findings deduplicated (same file + line + message) and persisted to SQLite
+      8. Rich table printed to terminal with color-coded severity
+      9. Exit with code 1 if any critical findings found, else exit 0
+    </local_scan_cli>
+
+    <github_pr_review>
+      1. Developer runs: codereview pr --repo owner/repo --pr 42
+      2. PyGithub authenticates with GITHUB_TOKEN, fetches PR diff
+      3. Per-file diffs reconstructed from unified diff format
+      4. Same ReviewEngine processes each changed file chunk
+      5. If --dry-run: print findings to terminal without posting
+      6. If not dry-run: post findings as inline review comments via GitHub Review API
+      7. Add summary comment to PR with count by severity (critical/warning/suggestion)
+      8. Exit code 1 if critical findings found
+    </github_pr_review>
+
+    <streamlit_dashboard_navigation>
+      1. User opens http://localhost:8501
+      2. Streamlit sidebar: select repo from dropdown, pick date range
+      3. Dashboard tab: summary cards (st.metric) + Plotly critical trend chart
+      4. Files tab: top 10 offending files table, click row to expand finding details
+      5. Team tab: per-author Plotly bar chart, sortable author table
+      6. Findings can be marked as suppressed (false-positive) via toggle in detail view
+      7. Suppressed findings excluded from counts in all charts and tables
+    </streamlit_dashboard_navigation>
+  </key_interactions>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Project Scaffold and Database Layer</title>
+      <tasks>
+        - Create pyproject.toml with all dependencies, src/codereviewbot/ package structure
+        - Define SQLAlchemy ORM models for all 4 tables (reviews, findings, repo_configs, team_stats)
+        - Set up Alembic for migrations: alembic init, create initial migration
+        - Write db.py: engine creation, session factory, create_all() on startup
+        - Create tests/ directory with pytest configuration
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>ReviewEngine — Core AI Logic</title>
+      <tasks>
+        - engine.py: FileChunker class — split file into 200-line chunks with 20-line overlap
+        - Build Claude system prompt template with configurable focus areas
+        - Call Anthropic SDK: claude-sonnet-4-6, structured JSON output, timeout=30s
+        - Pydantic schema: FindingSchema with severity, line_start, line_end, message, suggestion, category
+        - Validate and deduplicate findings before returning
+        - Handle: API timeout, malformed JSON response, empty findings list
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>CLI Commands with Click</title>
+      <tasks>
+        - cli.py: Click group with commands scan, pr, history, report, config
+        - scan command: directory walker with .codereviewbotignore support, tqdm progress, Rich table output
+        - history command: query reviews from DB, tabulate results, --last 30d filter
+        - report command: --format markdown and --format github-comment options via Jinja2
+        - config command: init (create default .codereviewbot.yaml), show, validate
+        - All commands: load .env via python-dotenv, verify ANTHROPIC_API_KEY present
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>GitHub PR Integration</title>
+      <tasks>
+        - github.py: PyGithub wrapper — authenticate, fetch PR diff, parse per-file hunks
+        - Map finding line numbers to PR diff position (GitHub's position system)
+        - Post inline review comments via create_review() with all findings at once
+        - Post summary comment: Markdown table of findings by severity
+        - --dry-run: print findings to terminal, skip all GitHub API calls
+        - Handle: invalid PR number, missing GITHUB_TOKEN, rate limit errors
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>FastAPI Server</title>
+      <tasks>
+        - api.py: FastAPI app with all REST endpoints for reviews, findings, stats, config
+        - GET /api/reviews with query params: repo, scan_type, date_from, date_to
+        - GET /api/stats/summary, /trend, /team — used by Streamlit dashboard
+        - PUT /api/findings/:id/suppress — toggle suppressed flag
+        - GET /api/config/:repo_name, PUT /api/config/:repo_name
+        - CORS enabled for Streamlit on port 8501
+        - Run on port 8000 with uvicorn
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>Streamlit Dashboard</title>
+      <tasks>
+        - dashboard.py: 3-tab layout via st.tabs([Dashboard, Files, Team])
+        - Sidebar: repo selectbox, date range date_input, severity multiselect, author selectbox
+        - Dashboard tab: st.metric summary cards, Plotly critical trend line chart
+        - Files tab: st.dataframe top-10 files, st.expander for finding details per file
+        - Team tab: Plotly stacked bar chart per author, sortable dataframe
+        - All data fetched from FastAPI endpoints (requests library)
+        - Suppress toggle: PUT /api/findings/:id/suppress, st.rerun() to refresh
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Export and Reporting</title>
+      <tasks>
+        - templates/report.md.j2: Jinja2 template for Markdown report
+        - templates/pr_comment.md.j2: GitHub PR summary comment template
+        - report command renders Jinja2 template from DB findings, prints to stdout
+        - github-comment format: POST to GitHub PR comments via PyGithub
+        - Scheduled email digest: smtplib STARTTLS, weekly cron, HTML email with top findings
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>Polish, Tests, and Docker</title>
+      <tasks>
+        - Unit tests: ReviewEngine chunking logic, finding deduplication, Pydantic validation
+        - Unit tests: SLA/history query filters, suppress toggle, exit code logic
+        - Integration test: mock Claude API response, run full scan cycle, verify DB state
+        - docker-compose.yml: FastAPI service + Streamlit service + shared SQLite volume
+        - README: installation, quick start, .codereviewbot.yaml reference, Docker setup
+        - Makefile: make install, make test, make start, make scan DIR=./src
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - codereview scan completes for a 10k-line Python repo in under 60 seconds
+      - GitHub PR review correctly posts inline comments at the right line numbers
+      - History and dashboard reflect accurate finding counts matching CLI output
+      - Exit code 1 returned when any critical findings exist
+      - --dry-run flag previews without making any GitHub API calls
+    </functionality>
+
+    <user_experience>
+      - CLI output readable in both light and dark terminal themes via Rich auto-detect
+      - Dashboard loads in under 2 seconds for 30-day query range
+      - .codereviewbot.yaml documented with inline comments in generated default config
+      - tqdm progress bar visible during multi-file scans
+    </user_experience>
+
+    <technical_quality>
+      - All Claude responses validated against Pydantic schema before DB write
+      - 80%+ unit test coverage on ReviewEngine chunking and prompt logic
+      - SQLite queries use parameterized statements (no f-string SQL)
+      - ANTHROPIC_API_KEY and GITHUB_TOKEN loaded exclusively from environment variables
+      - README includes Docker Compose setup for full stack in one command
+      - Alembic migrations used for all schema changes
+    </technical_quality>
+  </success_criteria>
+</project_specification>
