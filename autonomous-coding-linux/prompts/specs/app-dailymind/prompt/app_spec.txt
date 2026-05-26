@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app_specification>
+
+  <project_name>DailyMind — AI-Powered Private Journal</project_name>
+
+  <overview>
+    DailyMind is a fully-featured desktop journal application powered by Claude AI.
+    Built with PyQt6, it combines rich-text daily journaling with intelligent AI features:
+    mood analysis, automatic tagging, reflection prompts, and habit tracking —
+    all stored locally in SQLite with no cloud dependency.
+
+    Target users: developers, writers, knowledge workers who want a private,
+    AI-enhanced journaling experience without data leaving their machine.
+
+    Key differentiators:
+    - Fully offline-first; AI features require only an API key, no account signup
+    - Split-pane Markdown editor with live preview
+    - Claude-powered mood inference, auto-tagging, and reflective prompts
+    - Habit tracker with streak counting and weekly completion heatmap
+    - Encrypted SQLite database option for privacy-conscious users
+  </overview>
+
+  <technology_stack>
+    <language>Python 3.12+</language>
+    <gui_framework>PyQt6</gui_framework>
+    <database>SQLite via SQLAlchemy 2.0 (ORM + create_all migrations)</database>
+    <ai_sdk>Anthropic Claude SDK (anthropic>=0.50.0)</ai_sdk>
+    <ai_models>
+      <default>claude-haiku-4-5 (fast, low-cost, used for tagging/mood/prompts)</default>
+      <premium>claude-sonnet-4-6 (higher quality, used for deep reflection)</premium>
+    </ai_models>
+    <dependencies>
+      <dep>PyQt6>=6.6.0</dep>
+      <dep>PyQt6-Charts>=6.6.0 (mood trend bar charts)</dep>
+      <dep>SQLAlchemy>=2.0.0</dep>
+      <dep>anthropic>=0.50.0</dep>
+      <dep>markdown2>=2.4.0 (Markdown to HTML preview)</dep>
+      <dep>reportlab>=4.0.0 (PDF export)</dep>
+      <dep>cryptography>=41.0.0 (optional AES-256 DB encryption)</dep>
+      <dep>platformdirs>=4.0.0 (cross-platform data directories)</dep>
+      <dep>keyring>=24.0.0 (OS keychain for API key storage)</dep>
+      <dep>pytest>=7.0.0 (testing)</dep>
+      <dep>pytest-qt>=4.0.0 (PyQt6 widget testing)</dep>
+    </dependencies>
+    <api_key>
+      Read from ANTHROPIC_API_KEY environment variable.
+      Fallback: read from ~/.dailymind/config.json key "anthropic_api_key".
+      If neither is set, AI features are disabled and user is prompted in Settings.
+      NOTE: For testing in automated environments, set ANTHROPIC_API_KEY=/tmp/api-key
+      (the file contains the actual key) or export ANTHROPIC_API_KEY directly.
+    </api_key>
+    <data_storage>
+      Journal database: ~/.dailymind/journal.db (SQLite)
+      Attachments: ~/.dailymind/attachments/
+      Logs: ~/.dailymind/logs/
+      Config: ~/.dailymind/config.json
+      Use platformdirs.user_data_dir("dailymind") for all path resolution —
+      never hardcode ~/.dailymind paths in code.
+    </data_storage>
+  </technology_stack>
+
+  <prerequisites>
+    <item>Python 3.12+ installed and available as python3</item>
+    <item>pip / venv available</item>
+    <item>ANTHROPIC_API_KEY set in environment (or config.json)</item>
+    <item>For headless/CI environments: Xvfb (sudo apt-get install xvfb)</item>
+    <item>For PDF export: reportlab installed (included in requirements.txt)</item>
+    <item>System Qt6 libraries (installed automatically with PyQt6 wheel)</item>
+  </prerequisites>
+
+  <database_schema>
+    <table name="entries">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>date TEXT NOT NULL UNIQUE (YYYY-MM-DD — one entry per day)</column>
+      <column>title TEXT (optional headline, auto-generated from first line if blank)</column>
+      <column>body TEXT NOT NULL (raw Markdown content)</column>
+      <column>mood INTEGER CHECK(mood BETWEEN 1 AND 5) (1=terrible, 5=excellent)</column>
+      <column>mood_note TEXT (user's one-line mood description)</column>
+      <column>tags TEXT DEFAULT '[]' (JSON array of tag strings)</column>
+      <column>word_count INTEGER DEFAULT 0</column>
+      <column>created_at TEXT (ISO 8601 timestamp)</column>
+      <column>updated_at TEXT (ISO 8601 timestamp)</column>
+      <column>is_pinned INTEGER DEFAULT 0</column>
+      <column>is_deleted INTEGER DEFAULT 0 (soft delete)</column>
+    </table>
+
+    <table name="entry_versions">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>entry_id TEXT REFERENCES entries(id) ON DELETE CASCADE</column>
+      <column>body TEXT NOT NULL (snapshot of Markdown body)</column>
+      <column>saved_at TEXT (ISO 8601 timestamp)</column>
+      <column>version_num INTEGER NOT NULL</column>
+      <index>UNIQUE(entry_id, version_num)</index>
+      <note>Keep last 10 versions per entry; delete oldest on overflow</note>
+    </table>
+
+    <table name="habits">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>name TEXT NOT NULL</column>
+      <column>icon TEXT (single emoji character)</column>
+      <column>color TEXT DEFAULT '#4A90E2' (hex color for UI)</column>
+      <column>sort_order INTEGER DEFAULT 0</column>
+      <column>is_active INTEGER DEFAULT 1</column>
+      <column>created_at TEXT (ISO 8601)</column>
+    </table>
+
+    <table name="habit_logs">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>habit_id TEXT REFERENCES habits(id) ON DELETE CASCADE</column>
+      <column>date TEXT NOT NULL (YYYY-MM-DD)</column>
+      <column>completed INTEGER DEFAULT 0</column>
+      <column>note TEXT</column>
+      <index>UNIQUE(habit_id, date)</index>
+    </table>
+
+    <table name="ai_insights">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>entry_id TEXT REFERENCES entries(id) ON DELETE CASCADE</column>
+      <column>type TEXT NOT NULL (reflection | summary | tags | mood_inference)</column>
+      <column>prompt TEXT NOT NULL (the prompt sent to Claude)</column>
+      <column>response TEXT NOT NULL (Claude's response text)</column>
+      <column>model TEXT NOT NULL (model ID used)</column>
+      <column>created_at TEXT (ISO 8601)</column>
+      <column>tokens_used INTEGER DEFAULT 0</column>
+    </table>
+
+    <table name="templates">
+      <column>id TEXT PRIMARY KEY (UUID v4)</column>
+      <column>name TEXT NOT NULL (e.g. Morning Pages, Gratitude, Goal Review)</column>
+      <column>body TEXT NOT NULL (Markdown template with {{placeholder}} slots)</column>
+      <column>is_default INTEGER DEFAULT 0</column>
+      <column>created_at TEXT (ISO 8601)</column>
+    </table>
+
+    <fts_setup>
+      CREATE VIRTUAL TABLE entries_fts USING fts5(date, title, body, tags, content='entries');
+      Triggers: AFTER INSERT, AFTER UPDATE, AFTER DELETE on entries to keep FTS in sync.
+    </fts_setup>
+  </database_schema>
+
+  <api_endpoints_summary>
+    Not applicable — DailyMind is a desktop application with no REST API or web server.
+    All data access is through SQLAlchemy ORM queries to a local SQLite database.
+    AI calls are made directly from the application to the Anthropic API via the SDK.
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <description>Three-panel main window layout</description>
+    <ascii_layout>
+┌─────────────────────────────────────────────────────────────────────────┐
+│  DailyMind  [File] [Edit] [View] [AI] [Tools] [Help]     [🔍 Search]   │
+├───────────────────┬─────────────────────────────┬───────────────────────┤
+│  SIDEBAR (240px)  │  EDITOR PANE                │  AI PANEL (slide-in)  │
+│                   │                             │  (hidden by default)  │
+│  📅 Calendar      │  [📅 Today, May 26]  [mood] │                       │
+│                   │  Title: ____________  😐 🙂  │  ✨ AI Reflection     │
+│  ─ Today          │                             │  ─────────────────    │
+│  ─ This Week      │  ┌────────────┬───────────┐ │  Claude's response    │
+│  ─ Last Week      │  │ MARKDOWN   │  PREVIEW  │ │  appears here after   │
+│  ─ Archive        │  │ EDITOR     │  (HTML)   │ │  "Reflect with AI"    │
+│                   │  │            │           │ │  button click.        │
+│  PINNED ──────    │  │  (edit     │ (read-    │ │                       │
+│  📌 Entry title   │  │  here)     │  only)    │ │  [Copy] [Save to DB]  │
+│                   │  │            │           │ │                       │
+│  TAGS ─────────   │  └────────────┴───────────┘ │                       │
+│  #gratitude (5)   │                             │                       │
+│  #work (12)       │  ┌─────────────────────────┐│                       │
+│  #health (3)      │  │ HABIT TRACKER (foldable)││                       │
+│                   │  │ ☐ Exercise  ☐ Read       ││                       │
+│  [+ New Entry]    │  │ ☐ Meditate  ☐ Water      ││                       │
+│  [Templates...]   │  └─────────────────────────┘│                       │
+├───────────────────┴─────────────────────────────┴───────────────────────┤
+│  Words: 0  |  Auto-saved  |  Tags: —  |  [✨ Reflect] [📤 Export]      │
+└─────────────────────────────────────────────────────────────────────────┘
+    </ascii_layout>
+
+    <calendar_overlay>
+      Monthly calendar overlay (floating dialog):
+      Each day cell shows: has-entry indicator dot, mood color badge,
+      habit completion mini-bar. Click day to jump to that entry.
+    </calendar_overlay>
+
+    <mood_chart_dialog>
+      Weekly bar chart (PyQtChart QChartView):
+      X-axis: last 7 days, Y-axis: mood 1-5, bars colored by mood value.
+      Shows below editor in a collapsible widget or as a separate dialog.
+    </mood_chart_dialog>
+
+    <settings_dialog>
+      Tabbed settings dialog: General | Editor | AI | Themes | Privacy | Backup
+    </settings_dialog>
+  </ui_layout>
+
+  <core_features>
+    <feature id="1" name="Journal Editor">
+      Split-pane Markdown editor using QSplitter.
+      Left pane: QPlainTextEdit with Markdown syntax highlighting (QSyntaxHighlighter).
+      Right pane: QTextBrowser showing markdown2-rendered HTML preview.
+      Auto-save every 60 seconds via QTimer (saves silently to SQLite).
+      Focus mode: hides sidebar and AI panel, expands editor full-width.
+      Word count updates in real-time in status bar.
+      Keyboard shortcut Ctrl+S for manual save, Ctrl+Shift+F for focus mode.
+      Entry title auto-populated from first H1 heading in body.
+    </feature>
+
+    <feature id="2" name="AI Reflection and Prompts">
+      "Reflect with AI" button (lightning bolt icon) in status bar.
+      On click: sends entry body to Claude (model: haiku or sonnet per setting).
+      Claude analyzes content and returns 2-3 Socratic questions to prompt deeper thinking.
+      Response streams into the slide-in AI panel on the right.
+      Daily writing prompt: on app open with empty today's entry, Claude suggests a prompt.
+      "Expand this thought" context action: select text → right-click → Claude elaborates.
+      "Summarize week": menu action sends last 7 entries to Claude for weekly summary.
+      All AI responses stored in ai_insights table with model and token count.
+    </feature>
+
+    <feature id="3" name="Mood Tracking">
+      5-emoji mood selector per entry (😞 😕 😐 🙂 😄 representing 1-5).
+      Implemented as QButtonGroup with emoji labels, stored as integer 1-5.
+      AI mood inference: if mood not set on save, Claude infers mood from body text.
+      Weekly mood bar chart via PyQtChart QChartView (last 7 days, colored bars).
+      Monthly heatmap calendar: each day cell colored by mood value (5-level color scale).
+    </feature>
+
+    <feature id="4" name="Automatic Tagging and Search">
+      On entry save: Claude auto-generates 3-5 relevant tags from entry body.
+      Tags stored as JSON array in entries.tags column.
+      Manual tag editing: chip-style tag input widget in editor toolbar.
+      Tag cloud in sidebar: tags sized by frequency, click to filter entry list.
+      SQLite FTS5 full-text search: search box searches date/title/body/tags.
+      Search results highlighted in entry list; filter by tag, date range, mood.
+    </feature>
+
+    <feature id="5" name="Habit Tracker">
+      Define custom habits with name, emoji icon, and color (settings dialog).
+      Per-day habit checklist widget embedded in editor (foldable QGroupBox).
+      Streak counter: consecutive days with habit completed (shown in sidebar).
+      Weekly completion grid: 7-day heatmap showing completion per habit.
+      Claude habit insight: weekly AI analysis of habit completion patterns.
+      Data stored in habits and habit_logs tables.
+    </feature>
+
+    <feature id="6" name="Entry Organization">
+      Sidebar entry list grouped by: Today, This Week, Last Week, Archive.
+      Calendar date picker (custom QCalendarWidget) to jump to any date.
+      Pinned entries appear at top of sidebar (is_pinned flag in DB).
+      Templates: pre-built starters (Morning Pages, Gratitude, Goal Review).
+      Templates stored in templates table; user can create/edit templates.
+      Entry versioning: last 10 versions per entry, accessible from History menu.
+      Soft delete (is_deleted flag) with 30-day recovery in Trash view.
+    </feature>
+
+    <feature id="7" name="Privacy and Security">
+      All data stored locally — no cloud sync by default.
+      Optional AES-256 encryption of journal.db (cryptography.fernet library).
+      Encryption key derived from user password via PBKDF2HMAC + salt.
+      AI features have global toggle: "Offline Mode" disables all Claude calls.
+      API key stored in OS keychain via keyring library (fallback: config.json).
+      Config file permissions set to 600 on creation.
+    </feature>
+
+    <feature id="8" name="Export">
+      Single entry: export as .md (raw), .html (rendered), or .pdf (reportlab).
+      Date range export: ZIP archive of .md files, one per entry.
+      Full JSON backup: all tables serialized to structured JSON.
+      Import: JSON backup format and Day One JSON export format.
+      PDF uses reportlab Platypus for styled multi-page layout.
+    </feature>
+
+    <feature id="9" name="Settings and Customization">
+      4 QSS themes: Light, Dark, Solarized, Nord (loaded from themes/*.qss files).
+      Font family and size selection for editor (QFont dialog).
+      AI model selection: Haiku (default) or Sonnet.
+      Toggle per AI feature: auto-tagging, mood inference, daily prompts.
+      Backup schedule: daily/weekly auto-export to user-chosen directory.
+      Onboarding wizard on first run: sets data directory, API key, theme.
+    </feature>
+  </core_features>
+
+  <implementation_steps>
+    <step number="1" name="Project Scaffold and Database">
+      Create package structure: dailymind/app/{db,ai,ui,models,services,utils,themes}/
+      Write app/db/models.py: SQLAlchemy ORM for all 6 tables using DeclarativeBase.
+      Write app/db/migrations.py: create_all() + FTS5 virtual table + triggers via raw execute.
+      Write app/utils/config.py: read/write config.json using platformdirs.user_data_dir.
+      Set up logging: rotating file handler to ~/.dailymind/logs/app.log.
+      Write tests/test_db.py: test create_all runs without error on temp SQLite DB.
+    </step>
+
+    <step number="2" name="Core Editor Widget">
+      Implement app/ui/editor_pane.py: QSplitter with QPlainTextEdit + QTextBrowser.
+      Markdown syntax highlighter using QSyntaxHighlighter (headers, bold, italic, code).
+      Connect textChanged to markdown2 render → update QTextBrowser HTML.
+      QTimer(60000) for auto-save; manual save on Ctrl+S.
+      Word count computed on textChanged → update status bar label.
+      EntryService.save_entry() and get_entry() in app/services/entry_service.py.
+      tests/test_editor.py: widget initializes, text input triggers preview update (pytest-qt).
+    </step>
+
+    <step number="3" name="Sidebar and Navigation">
+      app/ui/sidebar.py: QListWidget with date-grouped entries (Today/Week/Archive sections).
+      Load entries from EntryService.list_entries(grouped=True) on startup and after save.
+      Tag cloud widget: custom QWidget painting clickable tag chips with frequency sizing.
+      FTS5 search: QLineEdit → debounced (300ms QTimer) → EntryService.search(query).
+      Calendar: QCalendarWidget subclass with mood color dots on dates with entries.
+      tests/test_sidebar.py: entry list populates correctly after DB insert.
+    </step>
+
+    <step number="4" name="AI Features">
+      app/ai/client.py: Anthropic SDK wrapper — create_message(), stream_message().
+      app/ai/worker.py: QThread subclass AIWorker — emits progress_signal(str) for streaming.
+      app/ai/prompts.py: constants for each feature prompt (reflection, tagging, mood, etc.).
+      app/ui/ai_panel.py: slide-in QWidget (QPropertyAnimation width 0→320) showing streamed text.
+      "Reflect with AI" button: spawns AIWorker, connects signal to ai_panel.append_text().
+      Auto-tagging: triggered in EntryService.save_entry() via AIWorker (fire-and-forget).
+      Mood inference: if entry.mood is None after save, AIWorker infers and updates.
+      tests/test_ai_client.py: mock anthropic client, verify prompts formed correctly.
+    </step>
+
+    <step number="5" name="Mood and Habit Tracking">
+      Mood selector: QButtonGroup with 5 emoji QPushButtons in editor toolbar.
+      PyQtChart QChartView for weekly mood bar chart (QBarSeries, QBarSet).
+      Habit tracker widget: QGroupBox (foldable) with QCheckBox per active habit.
+      HabitService.log_habit(habit_id, date, completed) in app/services/habit_service.py.
+      Streak counter: HabitService.get_streak(habit_id) — count consecutive completed days.
+      Weekly habit heatmap: custom QWidget painting 7-column grid with completion colors.
+      tests/test_habit.py: streak calculation correct for gaps and consecutive days.
+    </step>
+
+    <step number="6" name="Export and Privacy">
+      app/utils/export.py: export_markdown(entry), export_pdf(entry), export_json_backup().
+      PDF: reportlab SimpleDocTemplate with Paragraph styles for title/body/metadata.
+      Date-range ZIP: zipfile.ZipFile with one .md file per entry.
+      JSON backup: serialize all tables to dict; import reverses the process.
+      app/utils/encryption.py: Fernet encryption, key from PBKDF2HMAC(password + salt).
+      Encryption wrapper for SQLAlchemy engine: encrypt DB file on close, decrypt on open.
+      tests/test_export.py: markdown export matches body, PDF bytes > 0, JSON round-trips.
+    </step>
+
+    <step number="7" name="Themes, Settings, and Polish">
+      4 QSS files in app/themes/: light.qss, dark.qss, solarized.qss, nord.qss.
+      Load theme: QApplication.setStyleSheet(Path(theme_file).read_text()).
+      Settings dialog: QDialog with QTabWidget (General/Editor/AI/Privacy/Backup tabs).
+      Onboarding wizard: QWizard subclass, shown only if config.json absent.
+      Keyboard shortcuts: QAction with QKeySequence for all common actions.
+      Error handling: QMessageBox for user-visible errors; all AI errors non-blocking.
+      Run full pytest suite; launch with Xvfb and take screenshot for verification.
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <criterion>Application launches without crash (zero QApplication.exec() exceptions)</criterion>
+    <criterion>All 6 SQLite tables created by create_all() with correct schema</criterion>
+    <criterion>Journal entry can be typed, auto-saved, closed, and reloaded correctly</criterion>
+    <criterion>Markdown editor preview renders headings, bold, italic, code blocks</criterion>
+    <criterion>AI "Reflect with AI" returns a streamed response in the AI panel (requires valid API key)</criterion>
+    <criterion>Mood selector stores 1-5 value; weekly chart renders without crash</criterion>
+    <criterion>Habit checkboxes save to habit_logs; streak counter returns correct integer</criterion>
+    <criterion>Tag auto-generation produces 3-5 tags stored as JSON array in entries.tags</criterion>
+    <criterion>FTS5 search returns matching entries for a query that exists in body text</criterion>
+    <criterion>Export produces valid .md and non-empty .pdf files</criterion>
+    <criterion>All pytest tests pass: test_db, test_export, test_habit, test_ai_client</criterion>
+    <criterion>All Claude calls run in QThread workers — UI thread never blocks during AI calls</criterion>
+    <criterion>ANTHROPIC_API_KEY sourced only from environment (no hardcoded strings)</criterion>
+  </success_criteria>
+
+</app_specification>

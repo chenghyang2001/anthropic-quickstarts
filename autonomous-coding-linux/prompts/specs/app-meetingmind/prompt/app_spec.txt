@@ -1,0 +1,74 @@
+<project_specification>
+  <overview>
+    <name>MeetingMind</name>
+    <description>Desktop application that records, transcribes, and summarizes meetings entirely on-device. Audio captured via microphone or imported from file is transcribed using OpenAI Whisper running locally, then Claude generates structured summaries with agenda items, decisions, and action items. No audio or transcript ever leaves the user's machine.</description>
+    <audience>Knowledge workers, project managers, and remote teams who need searchable, actionable meeting records without cloud dependencies.</audience>
+  </overview>
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <ui_framework>PyQt6 6.7</ui_framework>
+    <audio_capture>PyAudio 0.2.14</audio_capture>
+    <audio_video_io>ffmpeg-python (subprocess wrapper)</audio_video_io>
+    <transcription>openai-whisper (local, CPU/GPU)</transcription>
+    <ai_summaries>Anthropic Claude (claude-sonnet-4-6)</ai_summaries>
+    <database>SQLite via SQLAlchemy 2.0</database>
+    <export>python-docx, fpdf2, Markdown (built-in)</export>
+    <search>SQLite FTS5 full-text search</search>
+    <api_key>Read from /tmp/api-key file: with open("/tmp/api-key") as f: os.environ["ANTHROPIC_API_KEY"] = f.read().strip()</api_key>
+  </technology_stack>
+  <prerequisites>
+    <item>Python 3.11+ installed</item>
+    <item>ffmpeg installed (sudo apt-get install -y ffmpeg)</item>
+    <item>pip install PyQt6 pyaudio ffmpeg-python openai-whisper anthropic sqlalchemy python-docx fpdf2 pytest pytest-qt icalendar</item>
+    <item>ANTHROPIC_API_KEY set in environment or /tmp/api-key file</item>
+    <item>Xvfb installed for headless GUI testing</item>
+    <item>openai-whisper downloads model weights on first use to ~/.cache/meetingmind/</item>
+  </prerequisites>
+  <core_features>
+    <feature name="audio_recording">Start/stop/pause controls, VU meter (PyQt6 canvas), configurable input device, 16kHz mono WAV output, auto-save every 5 minutes</feature>
+    <feature name="file_import">Drag-and-drop WAV/MP3/M4A/MP4/MKV/WebM; ffmpeg extracts audio track; progress dialog with cancel; warns if duration > 3 hours</feature>
+    <feature name="whisper_transcription">Model selection tiny/base/small/medium; QThread background worker; progress bar with percentage; word-level timestamps for clickable navigation; language auto-detect + manual override</feature>
+    <feature name="claude_summarization">Full transcript sent to Claude with metadata; structured output: purpose/agenda/decisions/action_items; action items as checkbox list with owner+due_date; re-summarize with custom focus</feature>
+    <feature name="speaker_diarization">Detect speaker changes via audio energy+pause analysis; auto-labels Speaker 1/2/3; user rename via double-click in transcript; colored blocks in timeline scrubber</feature>
+    <feature name="export">DOCX (python-docx with action item checkboxes), PDF (fpdf2), Markdown (Notion-compatible), CSV (action items only); batch export multiple meetings</feature>
+    <feature name="fts5_search">SQLite FTS5 index over all transcript text; instant sidebar search; results show meeting title/date/excerpt; filter by date range/participant/has-action-items</feature>
+    <feature name="calendar_integration">ICS file import (no OAuth); upcoming meetings panel (next 7 days); one-click Start recording for calendar entry</feature>
+  </core_features>
+  <database_schema>
+    meetings: (id PK, title TEXT NOT NULL, recorded_at DATETIME NOT NULL, duration_secs INTEGER, audio_path TEXT absolute path to WAV, whisper_model TEXT, language TEXT DEFAULT en, status TEXT DEFAULT pending pending/transcribing/done/error, notes TEXT)
+    transcripts: (id PK, meeting_id FK ON DELETE CASCADE, speaker TEXT, start_secs REAL NOT NULL, end_secs REAL NOT NULL, text TEXT NOT NULL)
+    action_items: (id PK, meeting_id FK ON DELETE CASCADE, description TEXT NOT NULL, owner TEXT, due_date DATE, completed BOOLEAN DEFAULT 0, created_at DATETIME NOT NULL)
+    participants: (id PK, meeting_id FK ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, speaker_label TEXT)
+    FTS5 virtual table transcripts_fts: (text, meeting_id UNINDEXED, content=transcripts, content_rowid=id)
+  </database_schema>
+  <api_endpoints_summary>N/A — desktop PyQt6 app, no HTTP server</api_endpoints_summary>
+  <ui_layout>
+    QMainWindow with QSplitter: left panel (Recording Controls + VU meter + Meeting List QListWidget + Search bar) | right panel (QSplitter: Transcript pane with speaker-labeled segments + Summary pane with collapsible sections). Bottom status bar shows transcription progress percentage.
+  </ui_layout>
+  <key_interactions>
+    1. Click Record → audio starts, VU meter animates → Stop → WAV saved → Whisper transcribes in QThread → segments appear in real-time → Claude summarizes → action items populate checklist
+    2. Drag MP4 → dialog prompts for title/participants → ffmpeg extracts audio → same transcribe+summarize pipeline
+    3. Type keyword in search → FTS5 returns ranked results → click result → opens meeting → Export DOCX → action items as Word checkboxes
+  </key_interactions>
+  <implementation_steps>
+    1. Project scaffold: src/meetingmind/, PyQt6 MainWindow skeleton, SQLAlchemy setup + FTS5 trigger
+    2. Audio recording module: PyAudio stream, WAV writer, VU meter widget QThread
+    3. File import pipeline: ffmpeg-python wrapper, drag-and-drop event handler
+    4. Whisper transcription worker: QThread subclass, progress signals, segment callback
+    5. Claude summarization: prompt template, structured output parser, action item extractor
+    6. UI layout: split QSplitter, transcript list widget, summary QTextBrowser
+    7. Search and calendar: FTS5 indexing on transcript save, ICS parser (icalendar library)
+    8. Export modules: DOCX (python-docx), PDF (fpdf2), Markdown formatter
+  </implementation_steps>
+  <success_criteria>
+    - Transcription accuracy >= 85% WER for clear English speech with Whisper base model
+    - Claude summary always includes at least one decisions and one action items section
+    - FTS5 search returns results within 200ms for 500 meetings database
+    - UI never freezes during transcription (all heavy work in QThreads)
+    - Recording start latency under 300ms from button click to audio capture
+    - Export to DOCX preserves action item checkboxes as actual Word checkboxes
+    - Audio files stored with absolute paths in DB
+    - Whisper model cached in ~/.cache/meetingmind/ after first download
+    - Transcript text written to FTS5 index atomically with transcript row insert
+  </success_criteria>
+</project_specification>

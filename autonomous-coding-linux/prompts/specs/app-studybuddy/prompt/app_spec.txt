@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app_specification>
+
+  <project_name>StudyBuddy — AI-Powered Spaced Repetition Flashcards</project_name>
+
+  <overview>
+    StudyBuddy is a PyQt6 desktop flashcard application combining SM-2 spaced repetition
+    with Claude AI. Users import Markdown, PDF, or plain text files; Claude auto-generates
+    Q&amp;A flashcard pairs from the content. During study sessions, when a card is answered
+    incorrectly, Claude provides contextual explanations with root cause analysis and mnemonics.
+
+    The application tracks long-term retention metrics per deck and exports to Anki-compatible
+    .apkg format so users can sync with the Anki mobile app.
+
+    Target users: students, language learners, exam preppers, developers learning new domains
+    who want AI-assisted card creation and intelligent explanations when they struggle.
+
+    Key differentiators:
+    - AI auto-generates flashcards from uploaded documents (no manual card creation)
+    - SM-2 spaced repetition for scientifically-optimal review scheduling
+    - Claude explains WHY an answer is correct when user rates card 1 or 2
+    - Full Anki .apkg export with scheduling data preserved
+    - Hierarchical deck organization with tags and bulk operations
+  </overview>
+
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <gui_framework>PyQt6</gui_framework>
+    <database>SQLite via SQLAlchemy 2.x (ORM + create_all migrations)</database>
+    <ai_sdk>Anthropic Claude SDK (anthropic>=0.50.0)</ai_sdk>
+    <ai_model>claude-sonnet-4-6 (higher quality for card generation and explanations)</ai_model>
+    <dependencies>
+      <dep>PyQt6>=6.6.0</dep>
+      <dep>SQLAlchemy>=2.0.0</dep>
+      <dep>anthropic>=0.50.0</dep>
+      <dep>pdfplumber>=0.10.0 (PDF text extraction)</dep>
+      <dep>markdown2>=2.4.0 (Markdown parsing)</dep>
+      <dep>genanki>=0.13.0 (Anki .apkg export)</dep>
+      <dep>matplotlib>=3.8.0 (retention/streak charts embedded in PyQt6)</dep>
+      <dep>pytest>=7.0.0</dep>
+      <dep>pytest-qt>=4.0.0 (PyQt6 widget testing)</dep>
+    </dependencies>
+    <api_key>
+      Read ONLY from ANTHROPIC_API_KEY environment variable.
+      If not set, AI features (card generation, explanations) are disabled with a clear
+      message to the user in the status bar. No fallback config files.
+      NOTE: For testing in automated environments, set ANTHROPIC_API_KEY=/tmp/api-key
+      (the file contains the actual key) or export ANTHROPIC_API_KEY directly.
+    </api_key>
+    <data_storage>
+      Database: ~/.local/share/studybuddy/studybuddy.db (SQLite, via platformdirs)
+      Exports: ~/Documents/StudyBuddy/exports/ (created on first export)
+      Use platformdirs.user_data_dir("studybuddy") — never hardcode paths.
+    </data_storage>
+  </technology_stack>
+
+  <prerequisites>
+    <item>Python 3.11+ installed and available as python3</item>
+    <item>pip / venv available</item>
+    <item>ANTHROPIC_API_KEY set in environment for AI features</item>
+    <item>For headless/CI environments: Xvfb (sudo apt-get install xvfb)</item>
+    <item>For PDF import: pdfplumber (included in requirements.txt)</item>
+    <item>For Anki export: genanki (included in requirements.txt)</item>
+  </prerequisites>
+
+  <database_schema>
+    <table name="decks">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>name TEXT NOT NULL</column>
+      <column>parent_id INTEGER REFERENCES decks(id) ON DELETE CASCADE (NULL = root deck)</column>
+      <column>color TEXT DEFAULT '#4A90E2' (hex color shown in sidebar tree)</column>
+      <column>created_at DATETIME DEFAULT CURRENT_TIMESTAMP</column>
+      <column>description TEXT</column>
+      <index>UNIQUE(name, parent_id) — sibling decks cannot share names</index>
+      <note>Hierarchy limited to 3 levels (root, child, grandchild) by application logic</note>
+    </table>
+
+    <table name="cards">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE</column>
+      <column>front TEXT NOT NULL (question or cloze template)</column>
+      <column>back TEXT NOT NULL (answer or cloze fill)</column>
+      <column>card_type TEXT DEFAULT 'basic' CHECK(card_type IN ('basic', 'cloze', 'image'))</column>
+      <column>tags TEXT DEFAULT '' (comma-separated tag string)</column>
+      <column>interval INTEGER DEFAULT 1 (SM-2: days until next review)</column>
+      <column>ease_factor REAL DEFAULT 2.5 (SM-2: difficulty multiplier, min 1.3)</column>
+      <column>repetitions INTEGER DEFAULT 0 (SM-2: consecutive correct reviews)</column>
+      <column>next_review DATE DEFAULT (date('now')) (YYYY-MM-DD)</column>
+      <column>ai_explanation TEXT (Claude's explanation, cached after first "Why Wrong?")</column>
+      <column>suspended BOOLEAN DEFAULT 0 (suspended cards skip scheduling)</column>
+      <column>created_at DATETIME DEFAULT CURRENT_TIMESTAMP</column>
+    </table>
+
+    <table name="study_sessions">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>started_at DATETIME NOT NULL</column>
+      <column>ended_at DATETIME</column>
+      <column>cards_reviewed INTEGER DEFAULT 0</column>
+      <column>avg_rating REAL (average quality rating 1-5 for this session)</column>
+      <column>deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL</column>
+    </table>
+
+    <table name="card_reviews">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE</column>
+      <column>session_id INTEGER REFERENCES study_sessions(id) ON DELETE SET NULL</column>
+      <column>rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5)</column>
+      <column>reviewed_at DATETIME DEFAULT CURRENT_TIMESTAMP</column>
+      <column>time_spent INTEGER (seconds spent on this card before rating)</column>
+    </table>
+  </database_schema>
+
+  <api_endpoints_summary>
+    Not applicable — StudyBuddy is a desktop application with no REST API or web server.
+    All data access is through SQLAlchemy ORM queries to a local SQLite database.
+    AI card generation and explanations use the Anthropic SDK directly from the app.
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <description>Two-panel main window: deck sidebar (left) + content area (right)</description>
+    <ascii_layout>
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  StudyBuddy   [File] [Study] [Import] [Export] [Help]                       │
+├───────────────────────┬─────────────────────────────────────────────────────┤
+│  DECK SIDEBAR (220px) │  CONTENT AREA (resizable)                           │
+│                       │                                                     │
+│  ▼ My Decks           │  ┌─────────────────────────────────────────────┐   │
+│    ▶ Python           │  │ CARD LIST (QTableWidget)                    │   │
+│    ▼ Math             │  │                                             │   │
+│      ▶ Calculus       │  │ Front          Back       Due      Tags     │   │
+│      ▶ Statistics     │  │ ─────────────────────────────────────────── │   │
+│    ▶ History          │  │ What is O(n)?  Linear...  Today   #cs #algo │   │
+│                       │  │ Define hash... Key-value  +2d     #cs       │   │
+│  [+ New Deck]         │  │ ...                                         │   │
+│                       │  └─────────────────────────────────────────────┘   │
+│  STUDY QUEUE          │                                                     │
+│  ─────────────        │  [🎯 Study Now (12 due)] [+ Add Card] [📥 Import]  │
+│  Due today: 12        │                                                     │
+│  New cards: 5         │  ─── Card Detail (selected card) ───               │
+│                       │  Front: What is O(n) time complexity?               │
+│  [▶ Start Session]    │  Back: Linear — operations grow proportionally      │
+│                       │       to input size. Example: single loop.          │
+│  STATS SNAPSHOT       │  Tags: #cs #algorithms   Type: basic                │
+│  ─────────────        │  Due: 2025-05-26  Ease: 2.50  Interval: 1 day      │
+│  Streak: 7 days       │  [Edit] [Suspend] [Delete] [💬 Why Wrong?]         │
+│  Retention: 87%       │                                                     │
+│  Total cards: 247     │                                                     │
+└───────────────────────┴─────────────────────────────────────────────────────┘
+    </ascii_layout>
+
+    <study_window>
+      Full-screen study mode (separate QWidget, no main window chrome):
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  [← Exit]  Python / Algorithms                          Card 3 of 12       │
+│                                                                             │
+│                                                                             │
+│              ┌─────────────────────────────────────┐                       │
+│              │                                     │                       │
+│              │   What is the time complexity of    │                       │
+│              │   binary search?                    │                       │
+│              │                                     │                       │
+│              │         [SPACE to flip]             │                       │
+│              │                                     │                       │
+│              └─────────────────────────────────────┘                       │
+│                                                                             │
+│       ┌── after flip ────────────────────────────────────────────────┐     │
+│       │  O(log n) — each step halves the search space.               │     │
+│       │  Works only on sorted arrays.                                │     │
+│       └──────────────────────────────────────────────────────────────┘     │
+│                                                                             │
+│  [1 Again] [2 Hard] [3 Good] [4 Easy] [5 Perfect]    [↩ Undo last]        │
+└─────────────────────────────────────────────────────────────────────────────┘
+    </study_window>
+
+    <import_dialog>
+      File import and AI card generation dialog:
+      Step 1: Drop file or browse (supports .md, .pdf, .txt)
+      Step 2: Preview extracted text chunks (QListWidget)
+      Step 3: Claude generates cards (progress bar + streaming count)
+      Step 4: Review generated cards in editable QTableWidget
+      Step 5: Select target deck and click "Save N Cards"
+    </import_dialog>
+
+    <stats_widget>
+      Statistics dashboard tab:
+      - Retention rate line chart per deck (matplotlib FigureCanvas)
+      - Study streak calendar heatmap (custom painted QWidget)
+      - Cards learned per day bar chart (matplotlib)
+      - Ease factor distribution histogram
+      - Export to CSV button
+    </stats_widget>
+  </ui_layout>
+
+  <core_features>
+    <feature id="1" name="Note Import and AI Flashcard Generation">
+      Accept .md, .pdf, .txt files via QFileDialog or drag-and-drop (QDropEvent).
+      Text extraction: pdfplumber for .pdf, markdown2 for .md, plain read for .txt.
+      Chunk extracted text into ~500-token segments (split on paragraph boundaries).
+      Send each chunk to Claude (claude-sonnet-4-6) with the generation prompt.
+      Claude returns JSON: [{"question": "...", "answer": "...", "type": "basic|cloze"}].
+      Cloze auto-detection: if answer appears verbatim in question context, convert to cloze format.
+      CardPreviewDialog: editable QTableWidget showing generated cards before saving.
+      User can delete, edit, or change card type before committing to DB.
+      Generated cards saved to selected deck after user confirmation.
+    </feature>
+
+    <feature id="2" name="SM-2 Spaced Repetition Scheduler">
+      Full SM-2 algorithm in sm2.py as a pure function (no DB dependency):
+        calculate_next_review(interval, ease_factor, repetitions, rating) -> (new_interval, new_ease, new_reps, next_date)
+      Rating scale: 1=Again(blackout), 2=Hard, 3=Good, 4=Easy, 5=Perfect
+      SM-2 rules:
+        - rating >= 3: repetitions += 1, new_interval based on repetitions count
+        - rating < 3: repetitions = 0, interval = 1 (reset)
+        - ease_factor += 0.1 - (5-rating) * (0.08 + (5-rating) * 0.02)
+        - ease_factor clamped to [1.3, ∞)
+        - interval_1 = 1, interval_2 = 6, interval_n = round(prev_interval * ease_factor)
+      Overdue-first queue: cards sorted by (next_review ASC, id ASC).
+      Configurable new cards per day (default 20, stored in local settings).
+    </feature>
+
+    <feature id="3" name="Multiple Card Types">
+      Basic (default): front = question text, back = answer text. Card flips on Space.
+      Cloze deletion: front uses {{c1::hidden}} syntax, displayed as blank "____" in study mode.
+        Back shows the full sentence with the cloze word highlighted.
+      Image occlusion: placeholder type — front shows "Image card (not yet supported)",
+        back shows the answer text. Stored in DB as card_type='image'.
+      Bulk type conversion: select multiple cards in CardListWidget → right-click → Convert to Cloze.
+      Cloze conversion: wraps the selected answer text in {{c1::}} within the front text.
+    </feature>
+
+    <feature id="4" name="Daily Study Session">
+      StudyWindow: full-screen QWidget (no parent, no title bar chrome).
+      Session start: create study_sessions record, load due cards (sorted by next_review).
+      Card display: front text in large QLabel centered in QFrame.
+      Flip: Space bar or "Show Answer" button → reveal back text below with QPropertyAnimation.
+      Rating buttons (1-5) appear only after flip. Keyboard shortcut: 1-5 keys.
+      On rating: call sm2.calculate_next_review() → update card in DB → log card_reviews record.
+      Undo last rating: revert card to previous SM-2 state (store pre-rating snapshot in memory).
+      Session summary dialog: total reviewed, avg rating, time spent, streak update.
+      Streak tracking: consecutive calendar days with at least one session having avg_rating >= 3.
+    </feature>
+
+    <feature id="5" name="AI Why Was I Wrong Explanation">
+      Triggered when user rates a card 1 or 2 (incorrect/hard) in study session.
+      Button "💬 Why Wrong?" appears below the answer after a low rating.
+      Claude prompt: "Explain why [front] has answer [back]. Provide: 1) root cause of confusion,
+        2) a memorable mnemonic, 3) a concrete real-world example. Be concise (max 150 words)."
+      Response streams into an ExplanationPanel (QFrame that slides in below the rating buttons).
+      Rate-limited: max 10 AI explanations per study session (counter shown in panel header).
+      Explanation cached in cards.ai_explanation (reused on next incorrect rating — no repeat API call).
+      Uses claude-sonnet-4-6 for higher-quality explanations.
+    </feature>
+
+    <feature id="6" name="Deck Organization">
+      Hierarchical deck tree: QTreeWidget with 3 levels max (root/child/grandchild).
+      Context menu on right-click: Add Child Deck, Rename, Change Color, Delete (with confirmation).
+      Color picker: QColorDialog for deck label color.
+      Card tagging: comma-separated tags stored in cards.tags, filterable in card list.
+      Full-text search: QLineEdit filters card list by front/back/tags text (case-insensitive).
+      Bulk operations on selected cards (multi-select QTableWidget):
+        - Move to deck (submenu of all decks)
+        - Suspend / Unsuspend
+        - Delete (with count confirmation)
+        - Change tags
+    </feature>
+
+    <feature id="7" name="Study Statistics">
+      StatsWidget embedded as a tab in the main content area.
+      Retention rate per deck: percentage of reviews with rating >= 3 over last 30 days.
+      Streak calendar heatmap: custom QWidget.paintEvent() drawing 7-wide grid of day cells,
+        colored by cards-reviewed count (0=white, light/medium/dark green scale).
+      Cards learned per day: matplotlib FigureCanvas bar chart (new cards reaching repetitions=1).
+      Ease factor trend: line chart of average ease_factor per deck over time.
+      CSV export: write study_sessions and card_reviews data to CSV with column headers.
+    </feature>
+
+    <feature id="8" name="Anki Export">
+      genanki library for .apkg format generation.
+      Map decks hierarchy to Anki format: Parent::Child::Grandchild name strings.
+      Basic cards → genanki.Note with Basic model (Front/Back fields).
+      Cloze cards → genanki.Note with Cloze model (Text field with {{c1::}} preserved).
+      Include scheduling data: interval, ease_factor, repetitions mapped to Anki card properties.
+      Save .apkg to ~/Documents/StudyBuddy/exports/DeckName_YYYYMMDD.apkg.
+      Show success dialog with file path and open-folder button.
+    </feature>
+  </core_features>
+
+  <implementation_steps>
+    <step number="1" name="Project Scaffold and SM-2 Algorithm">
+      Create package structure: studybuddy/app/{db,ui,services}/
+      Write studybuddy/sm2.py: pure SM-2 function with no imports beyond datetime.
+        def calculate_next_review(interval, ease_factor, repetitions, rating) -> tuple
+      Write studybuddy/app/db.py: SQLAlchemy ORM for all 4 tables using DeclarativeBase.
+        Include get_engine() using platformdirs.user_data_dir("studybuddy").
+        Create_all() in if __name__ == "__main__" block.
+      Write studybuddy/requirements.txt with all dependencies.
+      Write tests/test_sm2.py: test all SM-2 cases (again, hard, good, easy, perfect, min ease).
+      Verify: python3 -m pytest tests/test_sm2.py -v — all pass.
+    </step>
+
+    <step number="2" name="Deck Manager UI">
+      app/ui/deck_sidebar.py: QTreeWidget with hierarchical deck nodes.
+      Load decks from DB on startup; tree items store deck.id in Qt.ItemDataRole.UserRole.
+      Right-click context menu: QMenu with Add Child Deck, Rename, Change Color, Delete.
+      "Add Deck" dialog: QInputDialog for name + QColorDialog for color.
+      Rename: in-place editing (QTreeWidget setFlags(Qt.ItemIsEditable)) or QInputDialog.
+      Color swatch: paint deck color square next to name using QStyleOptionViewItem.
+      Emit deck_selected(deck_id: int) signal when tree item clicked.
+      tests/test_db.py: deck CRUD operations, parent-child relationships, cascade delete.
+    </step>
+
+    <step number="3" name="Card List and CRUD UI">
+      app/ui/card_list.py: QTableWidget with columns: Front(truncated), Back(truncated), Due, Tags, Type.
+      Load cards for selected deck_id from DB. Sort by next_review ASC.
+      Card detail panel below table: QTextEdit for front/back display (read-only), metadata labels.
+      CardEditorDialog: QDialog with QLineEdit for front/back, tag input, type QComboBox.
+      Double-click card row → open CardEditorDialog with pre-filled values.
+      "Add Card" button → empty CardEditorDialog.
+      Multi-select: Ctrl+Click / Shift+Click. Right-click on selection → bulk operations menu.
+      tests/test_db.py: card insert, update, delete, tag filter query.
+    </step>
+
+    <step number="4" name="File Import and AI Card Generation">
+      app/services/import_service.py:
+        extract_text_pdf(path) → str (pdfplumber)
+        extract_text_markdown(path) → str (markdown2 → strip HTML tags)
+        extract_text_plain(path) → str (read with encoding='utf-8')
+        chunk_text(text, max_tokens=500) → list[str] (split on double-newline boundaries)
+      app/services/claude_client.py:
+        generate_cards(chunks: list[str]) → list[dict] (async-compatible QThread call)
+        prompt: "You are a flashcard expert. Generate Q&amp;A flashcard pairs from this text.
+          Return JSON array only: [{\"question\": \"...\", \"answer\": \"...\", \"type\": \"basic\"}]
+          Generate 2-5 cards per chunk. Focus on key facts, definitions, and relationships."
+        Parse JSON response; validate each card has 'question' and 'answer' keys.
+      app/ui/import_dialog.py: QDialog with 5-step wizard UI using QStackedWidget.
+      tests/test_import.py: text extraction for each file type, chunking logic, JSON validation.
+    </step>
+
+    <step number="5" name="SM-2 Study Session UI">
+      app/ui/study_window.py: QWidget (no parent, showFullScreen() on open).
+      Load study queue: cards WHERE next_review &lt;= date('now') AND suspended=0 ORDER BY next_review.
+      Card display: QLabel for front text, large font (24pt), centered in QFrame.
+      Flip animation: QPropertyAnimation on card QFrame height (collapse to 0, expand with back shown).
+      Rating buttons: QPushButton × 5 labeled "1 Again" through "5 Perfect".
+        Keyboard: keyPressEvent handles 1-5 keys and Space.
+      On rating: call sm2.calculate_next_review() → update card in DB → append card_reviews record.
+      Undo: keep last-rated card state in memory dict; "Undo" button reverts DB write.
+      Session summary: QDialog showing count reviewed, avg rating, time, streak info.
+      tests/test_sm2.py: ensure calculate_next_review() handles all rating values correctly.
+    </step>
+
+    <step number="6" name="AI Explanation Integration">
+      After rating 1 or 2, show "💬 Why Wrong?" QPushButton below rating buttons.
+      On click: start AIExplanationWorker(QThread) with card front and back.
+      Prompt: "Explain why '{front}' has the answer '{back}'. Provide:
+        1) Root cause of why this is confusing
+        2) A memorable mnemonic
+        3) A concrete real-world example
+        Respond in max 150 words. Be clear and educational."
+      ExplanationPanel: QFrame that animates in (QPropertyAnimation, height 0 → 200).
+        Shows streaming text via QTextBrowser.append().
+      Session counter: track explanation calls; disable button at 10/session with label.
+      Cache result in cards.ai_explanation; on next wrong rating reuse without API call.
+      tests/test_import.py (or test_ai_client.py): mock Claude, verify prompt format and cache logic.
+    </step>
+
+    <step number="7" name="Statistics Dashboard">
+      app/ui/stats_widget.py: QWidget with QVBoxLayout containing:
+        - Deck selector QComboBox (or "All Decks")
+        - matplotlib FigureCanvas (retention rate line chart, 30-day window)
+        - Custom streak heatmap QWidget (7 columns × N rows, colored cells)
+        - matplotlib FigureCanvas (cards per day bar chart)
+        - "Export CSV" QPushButton
+      Retention rate calculation: count(reviews WHERE rating>=3) / count(all reviews) per deck.
+      Streak heatmap: for each day in last 90 days, query sum(cards_reviewed) from study_sessions.
+        Cell color: 0=lightgray, 1-3=lightgreen, 4-7=green, 8+=darkgreen.
+      CSV export: write study_sessions + card_reviews joined data using csv.DictWriter.
+      tests/test_db.py: retention rate calculation with known review data.
+    </step>
+
+    <step number="8" name="Anki Export and Final Polish">
+      app/services/export_service.py:
+        export_anki(deck_ids: list[int], output_path: str) — builds .apkg with genanki.
+        Build Anki deck names as "Parent::Child" strings.
+        Map card.interval, ease_factor to genanki card due/factor fields.
+        export_csv(output_path: str) — write sessions and reviews data.
+      Export menu item triggers QFileDialog for output directory, then calls export_service.
+      Keyboard shortcuts: QAction with QKeySequence for study (Ctrl+Space), import (Ctrl+I),
+        export (Ctrl+E), new deck (Ctrl+N), new card (Ctrl+K).
+      Error handling: QMessageBox for all recoverable errors (import fails, API timeout).
+      Run full pytest suite; screenshot verification with Xvfb.
+      tests/test_import.py: verify .apkg file is created and contains correct card count.
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <criterion>Application launches without crash (zero QApplication.exec() exceptions on startup)</criterion>
+    <criterion>All 4 SQLite tables created by create_all() with correct schema and constraints</criterion>
+    <criterion>SM-2 calculate_next_review() produces correct interval for all 5 rating values</criterion>
+    <criterion>File import extracts text from .md, .pdf, and .txt files without error</criterion>
+    <criterion>Claude generates valid JSON flashcard array from a sample text chunk</criterion>
+    <criterion>CardPreviewDialog shows generated cards in editable table before saving</criterion>
+    <criterion>Study session displays cards, flips on Space, accepts 1-5 ratings, updates DB</criterion>
+    <criterion>SM-2 scheduling updates cards.interval and cards.next_review after each rating</criterion>
+    <criterion>AI explanation appears for rating &lt;= 2 and is cached in cards.ai_explanation</criterion>
+    <criterion>Deck tree displays hierarchical structure; add/rename/delete work correctly</criterion>
+    <criterion>Statistics widget renders retention chart without crash (matplotlib in PyQt6)</criterion>
+    <criterion>Anki .apkg export produces a valid file (non-zero size, loadable by genanki)</criterion>
+    <criterion>All pytest tests pass: test_sm2, test_import, test_db</criterion>
+    <criterion>All Claude calls run in QThread workers — UI thread never blocks during AI calls</criterion>
+    <criterion>ANTHROPIC_API_KEY sourced only from os.environ (no hardcoded strings)</criterion>
+  </success_criteria>
+
+</app_specification>

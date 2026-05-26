@@ -1,0 +1,70 @@
+<project_specification>
+  <overview>
+    <name>DocTranslator</name>
+    <description>Desktop batch document translation app using Claude AI. Users drag in Word docs, PDFs, and text files, select source and target languages, and receive translated output with original formatting preserved. A terminology glossary ensures consistent translation of technical terms. A translation memory caches previous sentence-level translations to reduce cost and improve consistency.</description>
+    <audience>Technical writers, legal teams, academic researchers, and companies needing accurate batch translation without uploading sensitive content to public SaaS.</audience>
+  </overview>
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <ui_framework>PyQt6 6.7</ui_framework>
+    <word_documents>python-docx 1.1</word_documents>
+    <pdf_extraction>pdfplumber 0.11</pdf_extraction>
+    <ai_translation>Anthropic Claude (claude-sonnet-4-6, streaming)</ai_translation>
+    <database>SQLite via SQLAlchemy 2.0</database>
+    <export>python-docx (DOCX), fpdf2 (PDF), built-in (TXT)</export>
+    <async_execution>QThread + asyncio bridge</async_execution>
+    <configuration>python-dotenv + JSON config file</configuration>
+    <api_key>Read from /tmp/api-key file: with open("/tmp/api-key") as f: os.environ["ANTHROPIC_API_KEY"] = f.read().strip()</api_key>
+  </technology_stack>
+  <prerequisites>
+    <item>Python 3.11+ installed</item>
+    <item>pip install PyQt6 python-docx pdfplumber anthropic sqlalchemy alembic fpdf2 python-dotenv</item>
+    <item>ANTHROPIC_API_KEY set in environment or /tmp/api-key file</item>
+    <item>Xvfb installed for headless GUI testing</item>
+  </prerequisites>
+  <core_features>
+    <feature name="batch_file_import">Drag-and-drop DOCX/PDF/TXT/MD files; file list shows filename, format, page count, word count, status; folder import recursively discovers files</feature>
+    <feature name="language_selection">Source + target dropdown (20+ languages including EN/ZH-TW/ZH-CN/JA/KO/FR/DE/ES), auto-detect source, per-file language override</feature>
+    <feature name="streaming_translation">Claude translates sentence-by-sentence with streaming API; live preview; progress bar per file; Pause/Resume halts streaming mid-translation</feature>
+    <feature name="side_by_side_view">Left: original, Right: translated streaming; synchronized scrolling; click translated segment to edit inline; edits stored in TM</feature>
+    <feature name="terminology_glossary">Add source->target term pairs; injected into Claude system prompt; import/export CSV; per-project glossary support</feature>
+    <feature name="translation_memory">Cache by SHA-256 hash; exact 100% match skips Claude call; fuzzy 85% match; TM hit rate shown per file; TM import from TMX</feature>
+    <feature name="export">DOCX (preserve styles/headings/bold/italic/tables), PDF (fpdf2), TXT; batch export to output folder; filename: original_name_[target_lang].docx</feature>
+    <feature name="quality_review">Claude second-pass scores sentences 0.0-1.0; segments below threshold (0.75) highlighted orange; reviewer can edit inline or re-translate</feature>
+  </core_features>
+  <database_schema>
+    translation_jobs: (id PK, job_name TEXT, source_lang TEXT NOT NULL, target_lang TEXT NOT NULL, status TEXT DEFAULT pending, created_at DATETIME, started_at DATETIME, finished_at DATETIME, total_files INTEGER, completed_files INTEGER)
+    job_files: (id PK, job_id FK, original_path TEXT, output_path TEXT, file_format TEXT, word_count INTEGER, page_count INTEGER, status TEXT, error_message TEXT, tm_hit_rate REAL DEFAULT 0.0)
+    translation_memory: (id PK, source_lang TEXT, target_lang TEXT, source_text TEXT, translated_text TEXT, source_hash TEXT NOT NULL, quality_score REAL DEFAULT 1.0, usage_count INTEGER DEFAULT 1, created_at DATETIME, updated_at DATETIME, UNIQUE(source_hash, source_lang, target_lang))
+    glossary_terms: (id PK, glossary_name TEXT DEFAULT default, source_lang TEXT, target_lang TEXT, source_term TEXT, target_term TEXT, case_sensitive BOOLEAN DEFAULT 0, notes TEXT, created_at DATETIME, UNIQUE(glossary_name, source_lang, target_lang, source_term))
+  </database_schema>
+  <api_endpoints_summary>N/A -- desktop PyQt6 app, no HTTP server</api_endpoints_summary>
+  <ui_layout>
+    QMainWindow with QSplitter: left panel (file list QListWidget + language dropdowns + glossary selector) | right panel (QSplitter: transcript pane with original text | translated text streaming preview). Bottom: progress bar + action buttons (Translate All, Pause, Export). Status bar shows file/sentence progress and estimated time remaining.
+  </ui_layout>
+  <key_interactions>
+    1. Drag DOCX onto file list -> word count shown -> select EN->ZH-TW -> click Translate All -> streaming text appears in right pane -> export as DOCX
+    2. Batch 15 files -> TM checked per sentence -> TM hit rate shown per file -> all exported to output folder
+    3. Import glossary CSV -> glossary terms highlighted in source pane -> after translation Quality Review -> Claude scores segments -> edit flagged ones inline
+  </key_interactions>
+  <implementation_steps>
+    1. Project scaffold: pyproject.toml, src/doctranslator/, PyQt6 MainWindow skeleton
+    2. File parsers: python-docx paragraph extractor, pdfplumber text+page extractor, TXT/MD reader
+    3. SQLAlchemy models: 4 tables, Alembic migrations, TM hash index
+    4. Translation engine: Claude streaming integration, QThread worker, TM lookup/write
+    5. UI layout: QSplitter side-by-side, file list QListWidget, language dropdowns
+    6. Glossary manager: CRUD dialog, CSV import/export, system prompt injection
+    7. Quality review mode: second-pass Claude scoring, segment highlighting, review panel
+    8. Export modules: DOCX style preservation, PDF fpdf2, batch export loop
+  </implementation_steps>
+  <success_criteria>
+    - 10-page DOCX translated under 90 seconds for EN->ZH-TW with claude-sonnet-4-6
+    - Translation memory serves cached translations for identical sentences (hash match 100%)
+    - Glossary terms translated consistently across all paragraphs
+    - Streaming visible in right pane within 2 seconds of clicking Translate
+    - Pause/Resume resumes from the exact interrupted sentence
+    - Exported DOCX preserves H1/H2 headings, bold, italic, table structure
+    - TM SHA-256 hash index enables O(1) lookup for 100k+ entries
+    - Claude called with glossary in system prompt (never in human turn)
+  </success_criteria>
+</project_specification>

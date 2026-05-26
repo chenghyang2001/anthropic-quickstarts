@@ -1,0 +1,72 @@
+<project_specification>
+  <overview>
+    <name>ExpenseAI</name>
+    <description>Desktop personal finance application combining manual expense tracking with AI-powered receipt processing and spending analysis. Users enter expenses manually, import bank statement CSVs, or photograph receipts for Claude to extract and categorize automatically. Enforces per-category monthly budgets with alerts. Claude generates personalized monthly spending insight reports.</description>
+    <audience>Individuals who want fast daily expense logging without cloud connectivity requirements.</audience>
+  </overview>
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <ui_framework>PyQt6</ui_framework>
+    <database>SQLite via SQLAlchemy 2.x ORM</database>
+    <ai>Anthropic Claude API (claude-sonnet-4-6)</ai>
+    <data_analysis>pandas</data_analysis>
+    <charts>matplotlib embedded PyQt6 FigureCanvas</charts>
+    <pdf_export>reportlab</pdf_export>
+    <excel_export>openpyxl</excel_export>
+    <image_handling>Pillow</image_handling>
+    <notifications>plyer</notifications>
+    <api_key>Read from /tmp/api-key file: with open("/tmp/api-key") as f: os.environ["ANTHROPIC_API_KEY"] = f.read().strip()</api_key>
+  </technology_stack>
+  <prerequisites>
+    <item>Python 3.11+ installed</item>
+    <item>pip install PyQt6 anthropic sqlalchemy pandas matplotlib reportlab openpyxl Pillow plyer pytest pytest-qt</item>
+    <item>ANTHROPIC_API_KEY set in environment or /tmp/api-key file</item>
+    <item>Xvfb installed for headless GUI testing</item>
+  </prerequisites>
+  <core_features>
+    <feature name="manual_entry">Ctrl+N quick-entry dialog: amount, merchant, date picker, notes, category dropdown. Duplicate detection (same merchant+amount within 24h). Recurring expense templates.</feature>
+    <feature name="receipt_ocr">Drag-and-drop JPG/PNG/WebP receipt -> base64 encoded -> Claude Vision API -> JSON with merchant/amount/date/currency/line_items -> pre-filled editable dialog -> save</feature>
+    <feature name="ai_categorization">Claude classifies every expense (manual or imported) into 10 built-in categories + user custom. Confidence: HIGH/MEDIUM/LOW. Cached after 3 same-merchant occurrences. Batch re-categorize.</feature>
+    <feature name="budget_alerts">Monthly budget per category. Progress bars (green/yellow/red). plyer desktop notification at 80% and 100%. Budget carry-over option. Projected spend calculation.</feature>
+    <feature name="monthly_report">matplotlib FigureCanvas: pie chart by category, category table (planned vs actual), 6-month trend lines per category, top 5 merchants, day-of-week heatmap</feature>
+    <feature name="claude_insight">Aggregated spending data (not raw transactions) sent to Claude. 400-600 word insight with month-over-month changes, merchant frequency, budget adherence score 0-100, 3 recommendations, anomaly flags. Saved to monthly_summaries.</feature>
+    <feature name="csv_import">3-step wizard: file select -> column mapping -> preview/confirm. Saved mapping profiles per bank. Duplicate detection. Error rows report.</feature>
+    <feature name="export">PDF (reportlab A4 with charts), CSV (date range filter), Excel pivot table by category x month (openpyxl)</feature>
+  </core_features>
+  <database_schema>
+    expenses: (id PK, amount DECIMAL(10,2) NOT NULL CHECK(amount>0), currency TEXT DEFAULT USD, amount_usd DECIMAL(10,2), merchant TEXT NOT NULL, category_id FK categories, date DATE NOT NULL, notes TEXT DEFAULT '', receipt_path TEXT, source TEXT DEFAULT manual, ai_category TEXT, ai_confidence TEXT DEFAULT HIGH, user_overridden BOOLEAN DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)
+    categories: (id PK, name TEXT NOT NULL UNIQUE, color TEXT DEFAULT #4A90E2, icon TEXT DEFAULT 📂, is_custom BOOLEAN DEFAULT 0, sort_order INTEGER DEFAULT 99)
+    budgets: (id PK, category_id FK NOT NULL, amount DECIMAL(10,2) NOT NULL, month TEXT NOT NULL YYYY-MM, carry_over BOOLEAN DEFAULT 0, carry_over_amt DECIMAL DEFAULT 0, UNIQUE(category_id, month))
+    monthly_summaries: (id PK, month TEXT NOT NULL UNIQUE YYYY-MM, total_spend DECIMAL(10,2), budget_score INTEGER 0-100, claude_insight TEXT, generated_at DATETIME DEFAULT CURRENT_TIMESTAMP)
+  </database_schema>
+  <api_endpoints_summary>N/A -- desktop PyQt6 app, no HTTP server</api_endpoints_summary>
+  <ui_layout>
+    QMainWindow with: left sidebar (CategorySidebarWidget with QListWidget + budget progress bars) | main area (transaction QTableWidget with sort/filter). Bottom collapsible AI Insights Panel. Toolbar: Ctrl+N (add expense), Import Receipt, Import CSV. Month selector dropdown. Status bar shows totals.
+  </ui_layout>
+  <key_interactions>
+    1. Drag receipt image -> ReceiptImportDialog opens -> Claude Vision extracts fields -> user reviews/edits -> save -> budget bar updates
+    2. Expense saved that causes overspend -> plyer desktop notification fires within 1 second -> category bar turns red
+    3. Click Generate Insight -> aggregated data sent to Claude -> insight text saved to DB -> AI panel updated
+  </key_interactions>
+  <implementation_steps>
+    1. Project scaffold: PyQt6 main window, SQLAlchemy models 4 tables, seed 10 default categories
+    2. Expense CRUD: AddExpenseDialog, ExpenseListWidget QTableWidget, inline delete, duplicate detection
+    3. Category sidebar: CategorySidebarWidget, budget progress bars, real-time update on expense save
+    4. Receipt import: ReceiptImportDialog, base64 encoding, Claude Vision API, JSON parse, pre-fill form
+    5. CSV import: CSVImportWizard 3 steps, column mapping profiles, duplicate detection
+    6. Budget management: BudgetDialog, plyer notifications, projected spend calculation, carry-over
+    7. Reports and charts: ReportWidget matplotlib FigureCanvas, pie/trend/heatmap, month selector
+    8. Claude insight + export: aggregated payload, Claude API call, parse response; reportlab/CSV/openpyxl export
+  </implementation_steps>
+  <success_criteria>
+    - Receipt OCR extracts correct merchant and amount from clean receipts in >85% of cases
+    - CSV import parses 500 rows in less than 2 seconds with correct duplicate detection
+    - Budget alerts fire within 1 second of expense save causing overspend
+    - Claude monthly insight generated in less than 15 seconds
+    - PDF export produces readable A4 report with embedded charts
+    - Ctrl+N opens add dialog within 100ms from any screen
+    - Transaction list filters 5000+ rows without lag
+    - All monetary values stored as DECIMAL, never float
+    - Claude API calls non-blocking via QThread
+  </success_criteria>
+</project_specification>

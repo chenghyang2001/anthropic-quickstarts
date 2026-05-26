@@ -1,0 +1,400 @@
+<app_spec>
+  <project_name>PipelineGuard</project_name>
+
+  <overview>
+    PipelineGuard is a data pipeline monitoring and observability platform running
+    locally. The FastAPI backend (port 8000) handles pipeline CRUD, an execution
+    engine, data quality checks, and Claude AI anomaly analysis. The Streamlit
+    dashboard (port 8501) provides the operator UI. APScheduler runs pipelines
+    on cron schedules. After each pipeline run, Claude analyzes row count trends,
+    null rate changes, and execution time baselines, then generates plain-English
+    alerts and fix suggestions stored in the database. No external cloud services
+    required beyond ANTHROPIC_API_KEY.
+  </overview>
+
+  <technology_stack>
+    <language>Python 3.12+</language>
+    <api_framework>FastAPI 0.111 (port 8000, with uvicorn)</api_framework>
+    <ui_framework>Streamlit (port 8501, multi-page dashboard)</ui_framework>
+    <database>SQLite via SQLAlchemy 2.0 (async-compatible, but sync sessions acceptable)</database>
+    <scheduler>APScheduler 3.10 (cron-based pipeline scheduling)</scheduler>
+    <http_client>httpx (async HTTP for pipeline source fetching)</http_client>
+    <ai_model>Anthropic Claude claude-sonnet-4-6</ai_model>
+    <ai_api_key>Read from environment variable ANTHROPIC_API_KEY (also check /tmp/api-key file as fallback)</ai_api_key>
+    <data_processing>pandas 2.2</data_processing>
+    <validation>Pydantic v2</validation>
+    <logging>loguru</logging>
+    <dependencies_file>requirements.txt</dependencies_file>
+  </technology_stack>
+
+  <prerequisites>
+    <item>Python 3.12 or higher installed</item>
+    <item>pip available</item>
+    <item>ANTHROPIC_API_KEY environment variable set (or /tmp/api-key file containing the key)</item>
+    <item>No Docker required for basic operation — runs natively</item>
+    <item>SQLite included in Python standard library</item>
+    <item>curl available for API verification</item>
+  </prerequisites>
+
+  <core_features>
+    <feature id="1" name="Pipeline Definition and Management">
+      Full CRUD for pipeline definitions via both the FastAPI REST API and the
+      Streamlit UI. A pipeline has: name, description, schedule_cron (standard
+      5-field cron expression), config (JSON blob defining source, transforms,
+      destination), is_active flag, and timeout_seconds. The config JSON supports
+      these source types: csv_file (local path), json_file, rest_api (GET URL),
+      and sqlite_query (query against the local DB). Destinations: csv_file and
+      sqlite_table. Transforms: filter (pandas query string), rename (column map),
+      cast (column type map), drop_columns. Pipeline CRUD endpoints return full
+      pipeline objects with created_at/updated_at. The Streamlit Settings page
+      shows a pipeline list with edit/delete buttons and a create form. A
+      "Validate" button runs a dry-run (loads source, applies transforms, does NOT
+      write destination) and returns row count + column names.
+    </feature>
+
+    <feature id="2" name="Pipeline Execution Engine">
+      PipelineRunner class in api/services/runner.py executes a pipeline end-to-end:
+      (1) load source into pandas DataFrame, (2) apply transforms in order,
+      (3) run quality checks against output DataFrame, (4) write to destination
+      (if quality checks pass or severity is only "warning"), (5) record execution
+      in executions table with rows_input, rows_output, rows_failed, status, timing.
+      Execution is triggered by APScheduler (cron) or the manual trigger endpoint
+      POST /api/pipelines/{id}/run. Each execution writes a log file to data/logs/
+      using loguru (one file per execution, named {pipeline_id}_{execution_id}.log).
+      Parallel execution: multiple pipelines can run concurrently (APScheduler
+      threadpool executor, max_workers=4). Timeout enforcement via threading.Timer
+      sets execution status to "timeout" after timeout_seconds.
+    </feature>
+
+    <feature id="3" name="Data Quality Checks">
+      Six check types implemented as Python functions in api/services/quality.py,
+      each taking a pandas DataFrame and a QualityCheck config dict:
+      (1) not_null: column must have zero null values.
+      (2) unique: column must have no duplicate values.
+      (3) range: numeric column values must be within [min, max] bounds from config.
+      (4) regex: string column must match a regex pattern from config.
+      (5) row_count: output row count must be within [min_rows, max_rows] from config,
+          or within ±N% of the previous execution's row count.
+      (6) schema: DataFrame columns must match expected column list from config.
+      Each check returns: passed (bool), actual_value, expected_value, message.
+      Results stored in quality_results table per execution. A quality_score is
+      computed per execution: (passed_checks / total_checks) * 100. Checks with
+      severity "error" that fail will halt destination write. Checks with severity
+      "warning" that fail log a warning but allow destination write to proceed.
+    </feature>
+
+    <feature id="4" name="AI Anomaly Detection">
+      After each execution completes, a background task calls Claude claude-sonnet-4-6
+      to analyze the execution for anomalies. The ai_analyzer.py service queries
+      the last 10 executions of the same pipeline to compute historical baselines:
+      avg_rows_output, avg_duration_seconds, avg_null_rate per column (from
+      quality_results). It then compares the current execution against baselines
+      and builds a prompt for Claude: "You are a data pipeline monitoring expert.
+      Analyze this execution: [stats]. Historical baseline: [baseline]. Identify
+      any anomalies (row count drop >20%, execution time >2x baseline, new null
+      columns). For each anomaly found, provide: anomaly_type, severity
+      (info/warning/critical), summary (1 sentence), root_cause (hypothesis),
+      suggested_fix (actionable step)." Claude's response is parsed and stored as
+      one row per anomaly in ai_analyses table. The Anomaly Feed page shows all
+      recent anomalies across all pipelines sorted by severity then created_at.
+    </feature>
+
+    <feature id="5" name="Alerting System">
+      Alert configurations define when and how to notify operators. Supported
+      channels: email (smtplib), slack (webhook POST), webhook (generic HTTP POST).
+      Alert configs stored in alert_configs table with: pipeline_id, channel,
+      config JSON (contains email/URL/token), trigger_on JSON array (e.g.
+      ["execution_failed", "anomaly_critical", "quality_score_below_80"]),
+      cooldown_minutes (default 60), is_active. When an execution finishes or
+      an anomaly is detected, the alerting service checks all active alert_configs
+      for the pipeline. If trigger conditions match and cooldown has expired,
+      Claude generates a brief (3-sentence) alert message summarizing the issue
+      for human operators, then the alert is dispatched. Alert dispatch recorded
+      in alert_logs. The Streamlit Settings page allows creating/editing/deleting
+      alert configs with a form.
+    </feature>
+
+    <feature id="6" name="Streamlit Dashboard">
+      Five-page Streamlit dashboard consuming the FastAPI REST API via httpx:
+      (1) Overview page: status grid of all pipelines (card per pipeline showing
+          name, last_run status badge green/yellow/red, last_run time, success
+          rate last 7 days, quick "Run Now" button).
+      (2) Pipeline Detail page: selected pipeline's execution history chart
+          (Plotly line chart of rows_output over time), quality score trend,
+          latest AI analysis cards, recent alert log.
+      (3) Executions page: filterable table of all executions with status,
+          pipeline name, start time, duration, rows_in/out, quality score.
+          Click row to expand execution log (read from data/logs/).
+      (4) Anomaly Feed page: chronological list of all ai_analyses across all
+          pipelines. Severity color-coded (red=critical, yellow=warning, blue=info).
+          Each anomaly card shows: pipeline name, anomaly_type, summary,
+          root_cause, suggested_fix.
+      (5) Settings page: pipeline CRUD forms, quality check management per pipeline,
+          alert config management, system info (DB path, scheduler status).
+    </feature>
+
+    <feature id="7" name="REST API (FastAPI)">
+      Full RESTful API with automatic OpenAPI docs at /docs. All routes use
+      Pydantic v2 models for request/response validation. Async route handlers
+      (async def). Routes:
+      GET  /health — health check, returns {"status":"ok","version":"0.1.0"}
+      GET  /api/pipelines — list all pipelines
+      POST /api/pipelines — create pipeline (returns 201)
+      GET  /api/pipelines/{id} — get pipeline by UUID
+      PUT  /api/pipelines/{id} — update pipeline
+      DELETE /api/pipelines/{id} — delete pipeline (returns 204)
+      POST /api/pipelines/{id}/run — trigger immediate run (202, returns execution_id)
+      POST /api/pipelines/{id}/validate — dry-run validation (200, returns row_count + columns)
+      GET  /api/executions — list executions (query params: pipeline_id, status, limit)
+      GET  /api/executions/{id} — execution detail with quality_results
+      GET  /api/executions/{id}/analysis — Claude AI analysis for this execution
+      GET  /api/anomalies — anomaly feed (query params: severity, pipeline_id, limit)
+      GET  /api/metrics — Prometheus-format text metrics
+      GET  /api/pipelines/{id}/quality-checks — list quality checks for pipeline
+      POST /api/pipelines/{id}/quality-checks — create quality check
+      DELETE /api/quality-checks/{id} — delete quality check
+    </feature>
+
+    <feature id="8" name="Observability and Configuration">
+      Structured logging with loguru: all API requests logged with level, path,
+      status code, duration_ms. Each pipeline execution writes its own log file
+      to data/logs/{pipeline_id}_{execution_id}.log with per-row error details.
+      Prometheus-format metrics at GET /api/metrics:
+        pipelineguard_executions_total{pipeline,status} counter
+        pipelineguard_execution_duration_seconds{pipeline} histogram buckets
+        pipelineguard_quality_score{pipeline} gauge (last execution)
+        pipelineguard_anomalies_total{pipeline,severity} counter
+      Configuration via pydantic-settings: Settings class reads from environment
+      variables with PIPELINEGUARD_ prefix (PIPELINEGUARD_DB_PATH,
+      PIPELINEGUARD_LOG_LEVEL, PIPELINEGUARD_MAX_WORKERS, etc.) with defaults.
+      docker-compose.yml provided for containerized deployment (optional).
+      .env.example documents all environment variables.
+    </feature>
+  </core_features>
+
+  <database_schema>
+    <table name="pipelines">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>name TEXT NOT NULL UNIQUE</column>
+      <column>description TEXT</column>
+      <column>schedule_cron TEXT NOT NULL</column>
+      <column>config TEXT NOT NULL</column>
+      <column>is_active INTEGER NOT NULL DEFAULT 1</column>
+      <column>timeout_seconds INTEGER NOT NULL DEFAULT 300</column>
+      <column>created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+      <column>updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+      <note>id is UUID generated as str(uuid.uuid4()). config stores JSON as TEXT.</note>
+    </table>
+
+    <table name="executions">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>pipeline_id TEXT NOT NULL REFERENCES pipelines(id)</column>
+      <column>status TEXT NOT NULL CHECK(status IN ('running','success','failed','timeout'))</column>
+      <column>started_at TEXT NOT NULL</column>
+      <column>finished_at TEXT</column>
+      <column>rows_input INTEGER DEFAULT 0</column>
+      <column>rows_output INTEGER DEFAULT 0</column>
+      <column>rows_failed INTEGER DEFAULT 0</column>
+      <column>error_message TEXT</column>
+      <column>log_path TEXT</column>
+      <column>triggered_by TEXT CHECK(triggered_by IN ('scheduler','manual','api')) DEFAULT 'scheduler'</column>
+    </table>
+
+    <table name="quality_checks">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>pipeline_id TEXT NOT NULL REFERENCES pipelines(id)</column>
+      <column>column_name TEXT</column>
+      <column>check_type TEXT NOT NULL CHECK(check_type IN ('not_null','unique','range','regex','row_count','schema'))</column>
+      <column>config TEXT NOT NULL</column>
+      <column>severity TEXT NOT NULL CHECK(severity IN ('error','warning')) DEFAULT 'warning'</column>
+      <column>is_active INTEGER NOT NULL DEFAULT 1</column>
+    </table>
+
+    <table name="quality_results">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>execution_id TEXT NOT NULL REFERENCES executions(id)</column>
+      <column>check_id TEXT NOT NULL REFERENCES quality_checks(id)</column>
+      <column>passed INTEGER NOT NULL</column>
+      <column>actual_value TEXT</column>
+      <column>expected_value TEXT</column>
+      <column>message TEXT</column>
+    </table>
+
+    <table name="ai_analyses">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>execution_id TEXT NOT NULL REFERENCES executions(id)</column>
+      <column>anomaly_type TEXT NOT NULL</column>
+      <column>severity TEXT NOT NULL CHECK(severity IN ('info','warning','critical'))</column>
+      <column>summary TEXT NOT NULL</column>
+      <column>root_cause TEXT</column>
+      <column>suggested_fix TEXT</column>
+      <column>model TEXT</column>
+      <column>tokens_used INTEGER</column>
+      <column>created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+    </table>
+
+    <table name="alert_configs">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>pipeline_id TEXT NOT NULL REFERENCES pipelines(id)</column>
+      <column>channel TEXT NOT NULL CHECK(channel IN ('email','slack','webhook'))</column>
+      <column>config TEXT NOT NULL</column>
+      <column>trigger_on TEXT NOT NULL</column>
+      <column>cooldown_minutes INTEGER NOT NULL DEFAULT 60</column>
+      <column>is_active INTEGER NOT NULL DEFAULT 1</column>
+    </table>
+
+    <table name="alert_logs">
+      <column>id TEXT PRIMARY KEY</column>
+      <column>alert_config_id TEXT NOT NULL REFERENCES alert_configs(id)</column>
+      <column>execution_id TEXT REFERENCES executions(id)</column>
+      <column>message TEXT NOT NULL</column>
+      <column>sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+      <column>acknowledged INTEGER NOT NULL DEFAULT 0</column>
+      <column>acknowledged_at TEXT</column>
+    </table>
+  </database_schema>
+
+  <api_endpoints_summary>
+    GET  /health                                     — health check
+    GET  /api/pipelines                              — list pipelines
+    POST /api/pipelines                              — create pipeline (201)
+    GET  /api/pipelines/{id}                         — get pipeline
+    PUT  /api/pipelines/{id}                         — update pipeline
+    DELETE /api/pipelines/{id}                       — delete pipeline (204)
+    POST /api/pipelines/{id}/run                     — trigger run (202)
+    POST /api/pipelines/{id}/validate                — dry-run validation (200)
+    GET  /api/executions                             — list executions
+    GET  /api/executions/{id}                        — execution detail
+    GET  /api/executions/{id}/analysis               — AI analysis for execution
+    GET  /api/anomalies                              — anomaly feed
+    GET  /api/metrics                                — Prometheus metrics
+    GET  /api/pipelines/{id}/quality-checks          — list quality checks
+    POST /api/pipelines/{id}/quality-checks          — create quality check
+    DELETE /api/quality-checks/{id}                  — delete quality check
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <streamlit_pages>
+      <page name="Overview" file="dashboard/pages/overview.py">
+        Status grid: one card per pipeline. Each card shows name, status badge
+        (green/yellow/red based on last execution), last run time, 7-day success
+        rate, "Run Now" button (calls POST /api/pipelines/{id}/run). Auto-refreshes
+        every 30 seconds via st.rerun() with a timer.
+      </page>
+      <page name="Pipeline Detail" file="dashboard/pages/pipeline_detail.py">
+        Pipeline selector dropdown. Shows: execution history Plotly line chart
+        (rows_output over time, color-coded by status), quality score trend line,
+        latest AI analysis anomaly cards (severity-colored), recent alert log table.
+      </page>
+      <page name="Executions" file="dashboard/pages/executions.py">
+        Filterable/sortable table of all executions. Filters: pipeline_id, status,
+        date range. Columns: pipeline name, status badge, started_at, duration,
+        rows_in, rows_out, quality_score. Click row → expander showing execution
+        log file content (read from data/logs/).
+      </page>
+      <page name="Anomaly Feed" file="dashboard/pages/anomalies.py">
+        Chronological list of ai_analyses. Severity filter buttons. Each entry:
+        pipeline name, anomaly_type badge, summary text, expandable root_cause
+        and suggested_fix. Critical anomalies shown in red bordered card.
+      </page>
+      <page name="Settings" file="dashboard/pages/settings.py">
+        Three tabs: Pipelines (CRUD), Quality Checks (per-pipeline check management),
+        Alerts (alert config CRUD). System info sidebar: DB path, scheduler status,
+        uptime, total executions count.
+      </page>
+    </streamlit_pages>
+  </ui_layout>
+
+  <key_interactions>
+    <interaction>Operator creates pipeline via POST /api/pipelines with cron "0 * * * *" → APScheduler adds job → every hour PipelineRunner executes → quality checks run → Claude analyzes → results stored → Streamlit Overview refreshes</interaction>
+    <interaction>Operator clicks "Run Now" in Streamlit Overview → Streamlit calls POST /api/pipelines/{id}/run → FastAPI returns 202 with execution_id → background task runs PipelineRunner → execution recorded → Streamlit polls GET /api/executions/{id} for status</interaction>
+    <interaction>PipelineRunner finishes with 30% row count drop vs baseline → ai_analyzer detects anomaly → Claude generates "Row count dropped 30% from baseline 1000 to 700. Possible upstream data issue." → stored in ai_analyses → Anomaly Feed shows critical card</interaction>
+    <interaction>Alert config triggers on "anomaly_critical" → alerting service checks cooldown → Claude generates 3-sentence alert message → dispatches to Slack webhook → records in alert_logs</interaction>
+    <interaction>curl GET /api/metrics → returns Prometheus text with current counters and gauges for all pipelines</interaction>
+  </key_interactions>
+
+  <implementation_steps>
+    <step id="1" name="Project Scaffold and DB Models">
+      Create full directory structure. Write all 7 SQLAlchemy ORM models in
+      api/models/. Set up db.py with SQLite engine, SessionLocal factory, and
+      create_all(). Create FastAPI app in api/main.py with lifespan context manager
+      (init DB on startup, shutdown scheduler on shutdown). Add /health endpoint.
+      Write requirements.txt and pyproject.toml. Create .env.example.
+    </step>
+
+    <step id="2" name="Pipeline Execution Engine">
+      Implement PipelineRunner class in api/services/runner.py. Source loaders:
+      load_csv(path), load_json(path), load_rest_api(url via httpx), load_sqlite_query().
+      Transform engine: apply_transforms(df, transforms_list) applying filter/rename/
+      cast/drop_columns in sequence. Destination writers: write_csv(df, path),
+      write_sqlite_table(df, table_name). Execution record creation/update.
+      Log file creation via loguru. Timeout via threading.Timer.
+    </step>
+
+    <step id="3" name="Data Quality Check Engine">
+      Implement all 6 check functions in api/services/quality.py. Each function
+      signature: check_*(df: DataFrame, config: dict) -> QualityResult.
+      run_quality_checks(df, checks_list) runs all active checks for a pipeline,
+      stores results in quality_results, returns (overall_passed, quality_score).
+      Integrate into PipelineRunner: run checks after transform, before destination write.
+    </step>
+
+    <step id="4" name="APScheduler Integration">
+      Implement scheduler.py wrapping APScheduler BackgroundScheduler with
+      ThreadPoolExecutor(max_workers=4). On app startup (lifespan), query all
+      active pipelines and add cron jobs. CronTrigger from pipeline.schedule_cron.
+      On pipeline create/update/delete, dynamically add/remove/reschedule jobs.
+      Manual trigger endpoint POST /api/pipelines/{id}/run spawns PipelineRunner
+      in a thread, returns 202 immediately with execution_id.
+    </step>
+
+    <step id="5" name="AI Anomaly Detection">
+      Implement ai_analyzer.py with analyze_execution(execution_id) function.
+      Query last 10 executions of same pipeline. Compute baselines. Call Claude
+      claude-sonnet-4-6 with analysis prompt. Parse JSON response (list of anomaly
+      dicts). Store each in ai_analyses. Function called as background task via
+      FastAPI BackgroundTasks after execution completes.
+    </step>
+
+    <step id="6" name="Alerting System">
+      Implement api/services/alerting.py. check_and_dispatch(pipeline_id, execution_id,
+      trigger_event) queries active alert_configs for pipeline. For each matching
+      config: check cooldown (compare last alert_log sent_at vs now). If cooldown
+      expired: call Claude to generate 3-sentence alert message. Dispatch via
+      channel (smtplib for email, httpx POST for slack/webhook). Record in alert_logs.
+    </step>
+
+    <step id="7" name="Streamlit Dashboard">
+      Implement all 5 Streamlit pages in dashboard/pages/. Each page calls FastAPI
+      via httpx (BASE_URL = "http://localhost:8000"). Overview page: st.columns grid,
+      status badges via st.markdown with colored HTML, Run Now button with
+      st.spinner. Pipeline Detail: Plotly line charts via st.plotly_chart.
+      Executions: st.dataframe with st.expander for log content.
+      Anomaly Feed: st.container with custom HTML for severity cards.
+      Settings: st.tabs for pipeline/quality/alert CRUD forms.
+    </step>
+
+    <step id="8" name="Observability and Polish">
+      Add loguru middleware to FastAPI (log all requests). Implement /api/metrics
+      endpoint: query execution counts/durations/quality scores from DB, format as
+      Prometheus text. Add pydantic-settings Settings class in api/config.py.
+      Write docker-compose.yml (single service, mounts data/ volume). Write README
+      with YAML pipeline config examples. Add example pipeline configs in config/
+      pipelines.yaml.
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <criterion>FastAPI starts on port 8000, GET /health returns {"status":"ok"}</criterion>
+    <criterion>Streamlit starts on port 8501 with all 5 pages navigable without error</criterion>
+    <criterion>POST /api/pipelines creates a pipeline, GET /api/pipelines lists it</criterion>
+    <criterion>POST /api/pipelines/{id}/run returns 202 and records an execution in DB</criterion>
+    <criterion>All 6 quality check types run without error on a sample DataFrame</criterion>
+    <criterion>AI analysis generates and stores at least one ai_analyses row after execution</criterion>
+    <criterion>GET /api/metrics returns valid Prometheus text format</criterion>
+    <criterion>Streamlit Overview shows pipeline status cards updated in real time</criterion>
+    <criterion>All DB operations use SQLAlchemy ORM — no raw SQL string concatenation</criterion>
+    <criterion>ANTHROPIC_API_KEY never hardcoded — always from os.environ or /tmp/api-key</criterion>
+    <criterion>Execution log files created in data/logs/ per run</criterion>
+  </success_criteria>
+</app_spec>

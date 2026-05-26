@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project_specification>
+  <project_name>GitInsight — Git Repository Health and Activity Dashboard</project_name>
+
+  <overview>
+    GitInsight is a Streamlit web application that analyzes any local Git repository and produces
+    a comprehensive health and activity dashboard. It reads commit history using GitPython, aggregates
+    metrics using pandas, visualizes data with Plotly, and uses Claude AI to synthesize findings into
+    an actionable health report. All analysis results are cached in SQLite for instant repeat views.
+
+    The application is designed for developers and engineering managers who want deep insight into
+    their repository without leaving their local environment. It surfaces hidden patterns: which files
+    are high-churn risk, which contributors are becoming single points of failure, which branches have
+    been forgotten, and whether commit message quality is degrading over time.
+
+    GitInsight operates entirely offline except for the Claude AI report generation. All Git parsing,
+    metric computation, and visualization happen locally. The SQLite cache means re-opening the same
+    repository is instantaneous — no re-parsing needed unless the user explicitly requests a refresh.
+  </overview>
+
+  <technology_stack>
+    <api_key>
+      You can use an API key located at /tmp/api-key for testing. You will not be allowed to read
+      this file, but you can reference it in code. Load it with:
+        with open("/tmp/api-key") as f:
+            api_key = f.read().strip()
+      or via environment variable ANTHROPIC_API_KEY.
+    </api_key>
+    <web_framework>
+      <name>Streamlit</name>
+      <port>Streamlit dashboard runs on port 8501</port>
+      <notes>Pure Streamlit application — no FastAPI backend, no separate REST API server.</notes>
+    </web_framework>
+    <language>Python 3.11+</language>
+    <git_library>GitPython — commit iteration, file stats, rename detection, branch enumeration</git_library>
+    <data_processing>pandas — churn score aggregation, contributor metrics, file age calculations</data_processing>
+    <visualization>Plotly Express and Plotly Graph Objects — heatmaps, treemaps, area charts, scatter plots</visualization>
+    <database>SQLite via SQLAlchemy 2.x — 4 cache tables, ORM models, session factory pattern</database>
+    <ai>Anthropic Claude claude-sonnet-4-6 — health report generation, commit quality scoring</ai>
+    <pdf_export>reportlab — PDF export of analysis results</pdf_export>
+    <dependencies>
+      streamlit, gitpython, pandas, plotly, sqlalchemy, anthropic, reportlab, python-dateutil
+    </dependencies>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - ANTHROPIC_API_KEY environment variable must be set (or /tmp/api-key file present)
+      - Python 3.11+ installed
+      - Git must be installed and accessible in PATH (required by GitPython)
+      - At least one local Git repository available to analyze
+      - SQLite support (included in Python standard library — no separate install)
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    1. Repository Selection and Loading — Path input widget, path validation, GitPython repo
+       initialization, check SQLite cache for existing analysis, display cached or fresh results.
+       Support multiple repository tabs in one session.
+
+    2. Commit Activity Heatmap Calendar — GitHub-style contribution calendar visualized with
+       Plotly density_heatmap. Shows commit frequency per day over configurable time window
+       (30/90/180/365 days). Color intensity = commit count. Author filter dropdown.
+
+    3. Code Churn Analysis — Per-file churn score computed as weighted sum of lines added,
+       lines deleted, and commit count. Plotly treemap grouped by directory. Risk level
+       indicators (Low/Medium/High/Critical) color-coded. Sortable st.dataframe with
+       links to most-churned files.
+
+    4. Contributor Statistics — Per-author metrics: commit count, lines added/deleted, active days,
+       first/last commit date, is_active flag. Bus factor warning when top author owns >50% of commits.
+       Stacked area chart showing contribution share over time.
+
+    5. File Age Map — "Last touched" date for every tracked file. Heatmap by directory showing
+       average file age. Ancient files list (untouched > 1 year). Dead code candidate detection
+       (never modified after initial commit).
+
+    6. Claude Repository Health Report — Aggregated metrics JSON sent to Claude (no source code,
+       only statistics). Claude returns: overall health score, 5 prioritized recommendations,
+       risk summary, team dynamics observations. Cached in DB. Re-generate button available.
+
+    7. Branch Analysis — List all branches with: last commit date, last author, days inactive,
+       is_stale flag (>90 days), is_merged flag, commit count ahead of main. Naming convention
+       analysis. Stale branch cleanup recommendations.
+
+    8. Commit Message Quality Scoring — Claude evaluates 50 most recent commit messages on a
+       0-10 scale. Scores for: clarity, imperative mood, body presence, issue references.
+       Trend chart showing quality over time. Example good/bad commits highlighted.
+  </core_features>
+
+  <database_schema>
+    -- Primary analysis record per repository per run
+    CREATE TABLE repo_analyses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repo_path TEXT NOT NULL,
+        repo_name TEXT NOT NULL,
+        analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        days_analyzed INTEGER NOT NULL,
+        total_commits INTEGER,
+        total_files INTEGER,
+        total_authors INTEGER,
+        first_commit TIMESTAMP,
+        last_commit TIMESTAMP,
+        claude_report TEXT,               -- JSON string from Claude health report
+        commit_quality_score REAL         -- Average score 0-10 from Claude evaluation
+    );
+
+    -- Per-file metrics linked to an analysis
+    CREATE TABLE file_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        analysis_id INTEGER NOT NULL REFERENCES repo_analyses(id) ON DELETE CASCADE,
+        file_path TEXT NOT NULL,
+        churn_score REAL,
+        commit_count INTEGER,
+        last_touched TIMESTAMP,
+        primary_author TEXT,
+        lines_added INTEGER,
+        lines_deleted INTEGER,
+        risk_level TEXT CHECK(risk_level IN ('Low','Medium','High','Critical'))
+    );
+
+    -- Per-contributor metrics linked to an analysis
+    CREATE TABLE contributor_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        analysis_id INTEGER NOT NULL REFERENCES repo_analyses(id) ON DELETE CASCADE,
+        author_name TEXT NOT NULL,
+        author_email TEXT,
+        commit_count INTEGER,
+        lines_added INTEGER,
+        lines_deleted INTEGER,
+        active_days INTEGER,
+        first_commit TIMESTAMP,
+        last_commit TIMESTAMP,
+        is_active INTEGER DEFAULT 1       -- 1 if committed in last 90 days
+    );
+
+    -- Branch information linked to an analysis
+    CREATE TABLE branch_info (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        analysis_id INTEGER NOT NULL REFERENCES repo_analyses(id) ON DELETE CASCADE,
+        branch_name TEXT NOT NULL,
+        last_commit_date TIMESTAMP,
+        last_author TEXT,
+        is_merged INTEGER DEFAULT 0,
+        days_inactive INTEGER,
+        is_stale INTEGER DEFAULT 0,       -- 1 if days_inactive > 90
+        commit_count INTEGER
+    );
+  </database_schema>
+
+  <api_endpoints_summary>
+    Not applicable — Streamlit-only application with no separate REST API.
+    All data access is through the SQLite database directly from Streamlit page functions.
+    Claude API is called from claude_reporter.py module imported into Streamlit pages.
+  </api_endpoints_summary>
+
+  <ui_layout>
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │  GitInsight  🔍  Repository Health Dashboard                        │
+    │─────────────────────────────────────────────────────────────────────│
+    │  Sidebar:                      Main Content:                        │
+    │  ┌───────────────────┐         ┌─────────────────────────────────┐  │
+    │  │ Repository Path   │         │  Tab: Overview  |  Heatmap  |  │  │
+    │  │ [________________]│         │       Churn     |  Authors   |  │  │
+    │  │ [Analyze Repo]    │         │       Files     |  Branches  |  │  │
+    │  │                   │         │       Quality   |  Report    │  │  │
+    │  │ Time Window:      │         │─────────────────────────────────│  │
+    │  │ ○ 30d ○ 90d       │         │                                 │  │
+    │  │ ○ 180d ● 365d     │         │   [Active Tab Content]          │  │
+    │  │                   │         │                                 │  │
+    │  │ Author Filter:    │         │   Charts / Tables / Reports     │  │
+    │  │ [All Authors ▼]   │         │                                 │  │
+    │  │                   │         │                                 │  │
+    │  │ [Re-analyze]      │         │                                 │  │
+    │  │ [Export PDF]      │         │                                 │  │
+    │  │ [Export CSV]      │         └─────────────────────────────────┘  │
+    │  └───────────────────┘                                              │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    Tab layout (8 tabs total):
+    - Overview: metric cards (total commits, authors, files, date range), recent activity summary
+    - Heatmap: GitHub-style calendar heatmap, day-of-week breakdown bar chart
+    - Churn: treemap by directory, sortable file churn table with risk badges
+    - Authors: contributor table, bus factor warning banner, stacked area chart
+    - File Age: file age heatmap, ancient files list, dead code candidates table
+    - Branches: branch table with staleness indicators, naming convention analysis
+    - Quality: commit message score chart, good/bad examples, trend line
+    - Report: Claude health report rendered as formatted markdown, re-generate button
+  </ui_layout>
+
+  <key_interactions>
+    Flow 1 — Analyze a New Repository:
+      User enters repo path in sidebar → clicks "Analyze Repo" → Streamlit shows spinner
+      → git_parser.py iterates commits → metrics.py computes scores → results written to SQLite
+      → all 8 tabs become populated with charts/tables → user explores each tab.
+
+    Flow 2 — Return to Previously Analyzed Repo:
+      User enters same repo path → app detects cache hit in SQLite → instantly loads all
+      tabs from DB without re-parsing → user sees "Cached: [date]" badge → can click
+      "Re-analyze" to refresh.
+
+    Flow 3 — Generate Claude Report:
+      User clicks "Generate Health Report" in Report tab → claude_reporter.py assembles
+      aggregate metrics JSON → sends to Claude API → streams response into st.markdown
+      → result cached in DB → "Re-generate" button appears for future sessions.
+  </key_interactions>
+
+  <implementation_steps>
+    Step 1 — Project Scaffold:
+    Create the directory structure: gitinsight/app.py, git_parser.py, metrics.py,
+    claude_reporter.py, db.py, requirements.txt, README.md.
+    Implement db.py: SQLAlchemy 2.x engine, all 4 ORM models (RepoAnalysis, FileMetric,
+    ContributorStat, BranchInfo), create_all() call, session factory with context manager.
+    Implement the Streamlit app.py skeleton: 8-tab layout, sidebar with repo path input,
+    time window radio, author filter selectbox, Analyze/Re-analyze/Export buttons.
+    Verify DB initializes without error.
+
+    Step 2 — Git Parsing Engine:
+    Implement git_parser.py with GitRepo class. Methods: validate_repo(path), load_commits(days),
+    get_file_stats(commits), detect_renames(commits), get_branch_list().
+    Use repo.iter_commits() with since parameter. Handle merge commits (skip or include as config).
+    Extract per-commit: author name, email, timestamp, message, stats (insertions, deletions, files).
+    Handle GitCommandError, InvalidGitRepositoryError with user-friendly Streamlit error messages.
+    Return structured DataFrames for downstream metrics computation.
+
+    Step 3 — Metrics Computation:
+    Implement metrics.py with pure pandas functions.
+    compute_churn_score(file_df): weighted formula (lines_added * 0.3 + lines_deleted * 0.3 +
+    commit_count * 0.4), normalize 0-100, assign risk level thresholds.
+    compute_bus_factor(contributor_df): top-N authors covering 50% of commits.
+    compute_file_age(file_df, as_of_date): days since last_touched, categorize into age buckets.
+    compute_branch_staleness(branch_df, threshold_days=90): flag is_stale, days_inactive.
+    compute_contributor_activity(commits_df, window_days=90): is_active flag per author.
+    All functions return DataFrames with typed columns, no side effects.
+
+    Step 4 — Streamlit UI: Overview and Heatmap Tabs:
+    Overview tab: st.metric cards row (total commits, authors, files, date range).
+    Recent activity: last 10 commits as st.dataframe. Top 5 active files bar chart.
+    Heatmap tab: build date x weekday matrix from commits_df. Plotly density_heatmap with
+    custom colorscale (white → green). Day-of-week bar chart below. Author filter applies here.
+    Cache DataFrames in st.session_state to avoid recomputation on widget interaction.
+
+    Step 5 — Streamlit UI: Churn and File Age Tabs:
+    Churn tab: Plotly treemap with path=[directory, filename], values=churn_score,
+    color=risk_level (Low=green, Medium=yellow, High=orange, Critical=red).
+    Below treemap: st.dataframe with columns [file_path, churn_score, commit_count,
+    risk_level, primary_author, last_touched], sortable, with color-coded risk badges.
+    File Age tab: compute age in days. Plotly heatmap grouped by top-level directory.
+    Ancient files list (age > 365 days): st.dataframe with [file_path, last_touched, age_days,
+    primary_author]. Dead code candidates: files with 0 changes after initial commit.
+
+    Step 6 — Streamlit UI: Contributors and Branches Tabs:
+    Authors tab: summary metric: bus factor number with warning if bus_factor <= 2.
+    Contributor table: [author_name, commit_count, lines_added, lines_deleted, active_days,
+    last_commit, is_active]. is_active shown as green/red badge.
+    Stacked area chart: monthly contribution share per author (Plotly area chart).
+    Branches tab: branch table with [branch_name, last_commit_date, last_author, days_inactive,
+    is_stale, is_merged, commit_count]. Stale branches highlighted in red.
+    Naming convention analysis: detect branches not following common patterns (feature/, bugfix/,
+    hotfix/, release/). Show counts of convention violations.
+
+    Step 7 — Claude Integration:
+    claude_reporter.py: build_metrics_payload(analysis_id, db_session) — assembles JSON with
+    top-level stats, top 10 churned files, contributor summary, branch summary. No source code.
+    generate_health_report(payload, api_key) — Claude API call with structured system prompt,
+    parse response into: health_score (0-100), recommendations list, risk_summary, team_observations.
+    Cache result in repo_analyses.claude_report column.
+    evaluate_commit_quality(messages_list, api_key) — batch evaluate up to 50 messages.
+    Claude returns JSON array of scores. Compute average. Store in commit_quality_score column.
+    Retry logic: 3 attempts with exponential backoff on rate limit errors.
+
+    Step 8 — Export, Caching, and Quality Tab:
+    Quality tab: line chart of commit quality score over time (evaluate in batches by month).
+    Show 3 best and 3 worst commit messages as examples with their scores.
+    Cache invalidation: "Re-analyze" button deletes existing DB records for that repo_path
+    and triggers fresh analysis. Show "Last analyzed: [datetime]" badge.
+    PDF export: reportlab canvas with: cover page, metric summary table, top churned files,
+    contributor stats, Claude report text. Download via st.download_button.
+    CSV export: separate CSVs for file_metrics, contributor_stats, branch_info per analysis.
+    ZIP all CSVs into single download.
+  </implementation_steps>
+
+  <success_criteria>
+    Functional:
+    - App loads and displays Streamlit dashboard at http://localhost:8501
+    - Entering a valid Git repo path and clicking Analyze produces populated charts in all 8 tabs
+    - Entering an invalid path shows a user-friendly error (not a Python traceback)
+    - Re-opening the same repo path loads instantly from cache
+    - Heatmap renders a calendar grid with correct date alignment
+    - Treemap shows directory hierarchy with color-coded risk levels
+    - Bus factor warning appears when top author exceeds 50% commit share
+    - Claude health report generates and displays formatted markdown text
+    - PDF export downloads a non-empty PDF file
+    - Re-analyze button clears cache and re-runs fresh analysis
+
+    UX:
+    - Spinner/progress shown during analysis (not a blank frozen page)
+    - All charts are interactive (hover tooltips, zoom, pan)
+    - Tables are sortable by column
+    - Author filter in sidebar updates heatmap and contributor views
+    - No unhandled Python exceptions visible in Streamlit (red error boxes)
+
+    Technical Quality:
+    - SQLite DB created at startup if not exists
+    - All 4 ORM models have correct foreign key relationships
+    - git_parser.py handles repos with 0 commits, 1 commit, and 10,000+ commits
+    - metrics.py functions are pure (no Streamlit calls, no DB calls)
+    - claude_reporter.py never sends source code to Claude API — only metrics JSON
+    - PDF export contains at least 3 pages of content
+  </success_criteria>
+</project_specification>

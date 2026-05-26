@@ -1,0 +1,340 @@
+<app_spec>
+  <project_name>HealthLog</project_name>
+
+  <overview>
+    HealthLog is a personal health tracker running entirely locally on the user's machine.
+    Users log meals, exercise, sleep, weight, mood, and water intake through either a
+    Streamlit multi-page web UI (port 8501) or a quick-entry Click CLI (the `healthlog`
+    command). Claude generates weekly AI health reports that detect patterns such as
+    "sleep under 7 hours correlates with lower mood scores." All data is stored in a
+    local SQLite database — no cloud sync, no external accounts required beyond
+    ANTHROPIC_API_KEY for AI features.
+  </overview>
+
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <ui_framework>Streamlit 1.35 (multi-page app, port 8501)</ui_framework>
+    <cli_framework>Click 8 (entry point: `healthlog` command)</cli_framework>
+    <database>SQLite via SQLAlchemy 2.0 + Alembic migrations</database>
+    <ai_model>Anthropic Claude claude-sonnet-4-6</ai_model>
+    <ai_api_key>Read from environment variable ANTHROPIC_API_KEY (also check /tmp/api-key file as fallback)</ai_api_key>
+    <data_analysis>pandas 2.2, Plotly 5.22</data_analysis>
+    <notifications>plyer 2.1 (OS-native desktop notifications)</notifications>
+    <pdf_export>fpdf2</pdf_export>
+    <dependencies_file>requirements.txt</dependencies_file>
+  </technology_stack>
+
+  <prerequisites>
+    <item>Python 3.11 or higher installed</item>
+    <item>pip available</item>
+    <item>ANTHROPIC_API_KEY environment variable set (or /tmp/api-key file containing the key)</item>
+    <item>No Docker required — runs natively</item>
+    <item>SQLite included in Python standard library — no separate install</item>
+  </prerequisites>
+
+  <core_features>
+    <feature id="1" name="Multi-category Web Logging">
+      Streamlit multi-page app with dedicated log forms for all 6 health categories:
+      meals (name, meal_type, calories, macros), exercise (type, duration, intensity,
+      calories_burned), sleep (start_time, end_time, quality 1-5, notes), weight (kg),
+      mood (score 1-10, energy_level 1-10, notes), and water (glasses count with +/-
+      quick buttons). Each category has input validation with clear error messages.
+      Forms write to SQLite via SQLAlchemy ORM. Today's logged entries shown below
+      the form for immediate confirmation.
+    </feature>
+
+    <feature id="2" name="Quick-Entry Click CLI">
+      The `healthlog` command provides 6 subcommands for rapid logging without opening
+      a browser. Commands: `healthlog meal`, `healthlog sleep`, `healthlog weight`,
+      `healthlog mood`, `healthlog water`, `healthlog report`. Each subcommand
+      accepts structured arguments with --option flags. Meal command additionally
+      accepts a free-text natural language string (e.g. "oatmeal with berries 400cal")
+      that Claude parses into structured macros. Uses Rich library for colored terminal
+      output confirmation. All data written to the shared SQLite database.
+      Example usage:
+        healthlog meal "oatmeal 400cal" --time breakfast
+        healthlog sleep 7.5 --quality 4
+        healthlog weight 72.5
+        healthlog mood 7 --energy 8 --note "productive day"
+        healthlog water +1
+        healthlog report --week
+        healthlog export --format csv --days 90
+    </feature>
+
+    <feature id="3" name="Weekly AI Health Report">
+      Generates a structured weekly health analysis using Claude. pandas aggregates
+      the past 7 days of data across all categories. The aggregated stats are sent
+      to Claude claude-sonnet-4-6 with a prompt requesting: (a) cross-category
+      pattern detection (e.g. sleep duration vs mood correlation, exercise vs energy),
+      (b) week-over-week comparison if prior week data exists, (c) personalized
+      actionable suggestions (3-5 bullet points), and (d) a brief encouraging summary.
+      The response is stored in the ai_reports table and displayed in the AI Report
+      page with markdown rendering. Triggerable via `healthlog report --week` CLI
+      or the AI Report page button.
+    </feature>
+
+    <feature id="4" name="Trend Charts with Plotly">
+      Five interactive Plotly charts on the Charts page:
+      (1) Weight line chart with 7-day moving average overlay and goal line if set.
+      (2) Sleep duration bar chart with quality color-coding (green/yellow/red) and
+          recommended 7-8 hour band shading.
+      (3) Mood dual-axis chart: mood score bars + energy level line on secondary axis.
+      (4) Calories stacked bar chart by meal type (breakfast/lunch/dinner/snack) with
+          goal line if calorie goal is set.
+      (5) Exercise heatmap (GitHub-style) showing workout days and intensity over
+          the past 90 days.
+      All charts default to last 30 days with a date range selector. Charts are
+      rendered with plotly.graph_objects and displayed via st.plotly_chart.
+    </feature>
+
+    <feature id="5" name="Goal Tracking with Notifications">
+      Users define goals of three types: streak (e.g. "log exercise 5 days/week"),
+      cumulative (e.g. "walk 100km this month"), or average (e.g. "average 7.5h sleep").
+      Goals stored in the goals table with category, target_value, target_unit,
+      period_days, status (active/completed/failed). Dashboard page shows progress
+      bars for each active goal. When a goal milestone is reached (50%, 100%),
+      plyer sends an OS-native desktop notification. Background thread checks
+      goal progress every hour. Failed goals (past deadline, not met) auto-update
+      status to "failed."
+    </feature>
+
+    <feature id="6" name="Export Options">
+      Three export formats available from Settings page and `healthlog export` CLI:
+      (1) CSV export: pandas DataFrame from SQLAlchemy query, one CSV per category or
+          combined, with date range filter (--days flag). Clean column names suitable
+          for sharing with a doctor.
+      (2) PDF health report: fpdf2 generates a multi-page PDF containing summary
+          stats table, Plotly charts exported as PNG (kaleido), and the latest AI
+          report text. Filename format: healthlog_YYYY-MM-DD.pdf.
+      (3) Full SQLite backup: copies the .db file to ~/healthlog_backup_YYYY-MM-DD.db.
+    </feature>
+
+    <feature id="7" name="Reminder Notifications">
+      Configurable daily reminders for each logging category. Settings page allows
+      enabling/disabling reminders per category and setting reminder times. A
+      background thread (started with Streamlit via st.cache_resource or daemon thread
+      in CLI) checks current time against configured reminder times and fires plyer
+      OS-native notifications (title: "HealthLog Reminder", message: "Time to log
+      your [category]!"). Reminder configs stored as JSON in the goals table or a
+      dedicated settings JSON file. Notifications fire once per day per category
+      if that category has not yet been logged.
+    </feature>
+
+    <feature id="8" name="Dashboard Overview">
+      The main Dashboard page (dashboard_page.py) shows:
+      (a) Today's summary card: a table of what has been logged today vs not yet logged,
+          with completion percentage ring (st.metric or custom HTML).
+      (b) Week-at-a-glance: 7-day grid showing which categories were logged each day,
+          color-coded green/gray.
+      (c) Streak counters: current streak for each category (consecutive days logged).
+      (d) Quick-add recent meals: a "log again" button for the 5 most recent unique
+          meal names, immediately writing to today's meals without re-entering macros.
+      (e) Active goals summary with progress bars.
+    </feature>
+  </core_features>
+
+  <database_schema>
+    <table name="daily_logs">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>log_date DATE UNIQUE NOT NULL</column>
+      <column>weight_kg REAL</column>
+      <column>water_glasses INTEGER DEFAULT 0</column>
+      <column>mood_score INTEGER CHECK(mood_score BETWEEN 1 AND 10)</column>
+      <column>energy_level INTEGER CHECK(energy_level BETWEEN 1 AND 10)</column>
+      <column>mood_notes TEXT</column>
+      <column>sleep_start DATETIME</column>
+      <column>sleep_end DATETIME</column>
+      <column>sleep_quality INTEGER CHECK(sleep_quality BETWEEN 1 AND 5)</column>
+      <column>sleep_notes TEXT</column>
+    </table>
+
+    <table name="meals">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>log_date DATE NOT NULL</column>
+      <column>logged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+      <column>meal_type TEXT CHECK(meal_type IN ('breakfast','lunch','dinner','snack'))</column>
+      <column>name TEXT NOT NULL</column>
+      <column>calories INTEGER</column>
+      <column>protein_g REAL</column>
+      <column>carbs_g REAL</column>
+      <column>fat_g REAL</column>
+      <column>source TEXT CHECK(source IN ('manual','cli','ai_parsed')) DEFAULT 'manual'</column>
+    </table>
+
+    <table name="exercises">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>log_date DATE NOT NULL</column>
+      <column>logged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+      <column>exercise_type TEXT NOT NULL</column>
+      <column>duration_mins INTEGER NOT NULL</column>
+      <column>intensity INTEGER CHECK(intensity BETWEEN 1 AND 10)</column>
+      <column>calories_burned INTEGER</column>
+      <column>notes TEXT</column>
+    </table>
+
+    <table name="goals">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>name TEXT NOT NULL</column>
+      <column>category TEXT CHECK(category IN ('sleep','weight','exercise','calories','mood','water'))</column>
+      <column>goal_type TEXT CHECK(goal_type IN ('streak','cumulative','average'))</column>
+      <column>target_value REAL NOT NULL</column>
+      <column>target_unit TEXT</column>
+      <column>period_days INTEGER DEFAULT 7</column>
+      <column>started_at DATE NOT NULL DEFAULT CURRENT_DATE</column>
+      <column>ended_at DATE</column>
+      <column>status TEXT CHECK(status IN ('active','completed','failed')) DEFAULT 'active'</column>
+    </table>
+
+    <table name="ai_reports">
+      <column>id INTEGER PRIMARY KEY AUTOINCREMENT</column>
+      <column>report_date DATE NOT NULL</column>
+      <column>period_start DATE NOT NULL</column>
+      <column>period_end DATE NOT NULL</column>
+      <column>summary_text TEXT NOT NULL</column>
+      <column>raw_claude_response TEXT</column>
+      <column>generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP</column>
+    </table>
+  </database_schema>
+
+  <api_endpoints_summary>
+    Not applicable for REST API — Streamlit reads SQLite directly. FastAPI is not used.
+    All data access is through SQLAlchemy ORM from Streamlit pages and the Click CLI.
+    The healthlog package exposes Python service functions (meal_service, sleep_service,
+    aggregation, claude_client) that both the CLI and Streamlit import directly.
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <streamlit_pages>
+      <page name="Dashboard" file="pages/dashboard_page.py">
+        Today summary card, week-at-a-glance 7-day grid, streak counters,
+        quick-add recent meals, active goals progress bars.
+      </page>
+      <page name="Log Today" file="pages/log_today.py">
+        Tab-based interface with tabs for: Meals, Exercise, Sleep, Weight/Mood, Water.
+        Each tab has a form + list of today's entries for that category.
+      </page>
+      <page name="Charts" file="pages/charts.py">
+        5 Plotly charts with date range selector. Weight, Sleep, Mood, Calories, Exercise heatmap.
+      </page>
+      <page name="AI Report" file="pages/ai_report.py">
+        Generate button, loading spinner, rendered markdown of AI report.
+        History table of past reports with date and preview.
+      </page>
+      <page name="Settings" file="pages/settings.py">
+        Goal management (create/edit/delete goals), reminder configuration,
+        export buttons (CSV, PDF, SQLite backup), DB path info.
+      </page>
+    </streamlit_pages>
+  </ui_layout>
+
+  <key_interactions>
+    <interaction>User runs `healthlog meal "oatmeal 400cal" --time breakfast` → CLI sends text to Claude → Claude returns structured JSON with calories/protein/carbs/fat → CLI writes meal to DB → Rich confirms "Logged: oatmeal (400 kcal, 12g protein)"</interaction>
+    <interaction>User opens Streamlit → Log Today → Meals tab → fills form → clicks "Add Meal" → SQLAlchemy insert → success message → meal appears in today's list below form</interaction>
+    <interaction>User clicks "Generate Weekly Report" on AI Report page → pandas aggregates past 7 days → sends to Claude → streams response → stores in ai_reports → renders as markdown</interaction>
+    <interaction>User navigates to Charts page → selects "Last 90 days" → Plotly charts re-render with expanded date range</interaction>
+    <interaction>Midnight background thread checks: if yesterday's exercise not logged and goal requires daily exercise → plyer notification fires</interaction>
+    <interaction>User runs `healthlog export --format pdf --days 30` → fpdf2 generates PDF with charts and latest AI report → saves to current directory → confirms path</interaction>
+  </key_interactions>
+
+  <implementation_steps>
+    <step id="1" name="Project Scaffold">
+      Create package structure: healthlog/src/healthlog/ with __init__.py, models.py,
+      db.py, cli.py, dashboard.py, pages/ directory, services/ directory.
+      Define all 5 SQLAlchemy ORM models. Set up db.py with engine creation
+      (DATABASE_URL = sqlite:///~/.healthlog/healthlog.db), session factory,
+      and create_all(). Set up Alembic with alembic init and initial migration.
+      Create requirements.txt. Create pyproject.toml with [project.scripts]
+      healthlog = "healthlog.cli:cli". Verify `pip install -e .` works.
+    </step>
+
+    <step id="2" name="CLI Logging Commands">
+      Implement all 6 Click subcommands in cli.py: meal (with --time/--calories
+      options), sleep (duration in hours, --quality, --start, --end options),
+      weight (value in kg), mood (score, --energy, --note options), water
+      (accepts "+1", "-1", or absolute number), report (--week flag).
+      Each command validates input, creates ORM object, writes to DB via session.
+      Use Rich console for colored output. Handle DB errors gracefully.
+    </step>
+
+    <step id="3" name="Claude Macro Parsing for CLI Meals">
+      In services/claude_client.py, implement parse_meal_text(text: str) function.
+      Reads ANTHROPIC_API_KEY from os.environ (fallback: read /tmp/api-key file).
+      Sends prompt to claude-sonnet-4-6: "Parse this meal description into JSON with
+      fields: name, calories (int), protein_g (float), carbs_g (float), fat_g (float).
+      Meal: {text}". Parses JSON response. Returns dict with parsed values.
+      CLI meal command calls this when free-text argument provided. Falls back to
+      manual entry if Claude unavailable. source field set to "ai_parsed".
+    </step>
+
+    <step id="4" name="Streamlit Log Today Page">
+      Implement pages/log_today.py with st.tabs for all 6 categories.
+      Meals tab: form with meal_type selectbox, name text_input, calories/macros
+      number_inputs, submit button. Shows today's meals list below form.
+      Exercise tab: exercise_type, duration_mins, intensity slider, calories_burned.
+      Sleep tab: sleep_start time_input, sleep_end time_input, quality slider 1-5,
+      notes text_area. Auto-calculates duration. Weight/Mood tab: weight number_input,
+      mood slider 1-10, energy slider 1-10, notes. Water tab: current count display,
+      +1/-1 buttons, set absolute button. All forms call SQLAlchemy session on submit.
+    </step>
+
+    <step id="5" name="Streamlit Charts Page">
+      Implement pages/charts.py with date range selector (default 30 days).
+      Query SQLAlchemy for date range. Build 5 Plotly figures:
+      (1) go.Scatter weight line + go.Scatter 7-day MA + go.Scatter goal line.
+      (2) go.Bar sleep duration with color array based on quality score.
+      (3) go.Bar mood + go.Scatter energy on secondary y-axis.
+      (4) go.Bar calories stacked by meal_type with goal line.
+      (5) Exercise heatmap using go.Heatmap with log_date x-axis and intensity z-values.
+      Render each with st.plotly_chart(fig, use_container_width=True).
+    </step>
+
+    <step id="6" name="Goal Tracking and Notifications">
+      Implement goals CRUD in Settings page: form to create goal (name, category,
+      goal_type, target_value, target_unit, period_days), list with delete buttons.
+      In services/aggregation.py: calculate_goal_progress(goal) function that queries
+      DB and computes current value vs target. Dashboard shows st.progress bars.
+      In services/notifier.py: BackgroundNotifier class with threading.Thread daemon.
+      Runs every 3600 seconds. Checks goal progress milestones (50%, 100%).
+      Checks if categories not yet logged today and reminder time passed.
+      Uses plyer.notification.notify(title, message, timeout=10).
+    </step>
+
+    <step id="7" name="Weekly AI Report">
+      In services/aggregation.py: aggregate_weekly_stats() returns dict with:
+      avg sleep hours, avg mood score, avg energy, total exercise sessions,
+      total calories by day, weight trend, sleep-mood correlation coefficient.
+      In services/claude_client.py: generate_weekly_report(stats: dict) sends
+      formatted stats to Claude with prompt requesting pattern analysis and suggestions.
+      Returns report text string. AI Report page (pages/ai_report.py) has
+      "Generate Report" button that calls these functions, shows st.spinner,
+      writes to ai_reports table, renders with st.markdown. Also shows history
+      of past reports in an expander.
+    </step>
+
+    <step id="8" name="Export Modules">
+      In export.py:
+      export_csv(days: int, category: str = "all") → pandas DataFrame from SQLAlchemy
+      query, DataFrame.to_csv(), returns file path.
+      export_pdf(days: int) → fpdf2 FPDF object, add summary stats table using
+      fpdf MultiCell, export each Plotly chart as PNG bytes (fig.to_image()),
+      embed in PDF using FPDF.image(). Also embed latest AI report text.
+      Save to current directory.
+      export_sqlite() → shutil.copy DB file to ~/healthlog_backup_DATE.db.
+      CLI `healthlog export --format csv/pdf/sqlite --days N` calls these functions.
+      Settings page export buttons call same functions.
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <criterion>All 6 Click CLI commands execute without error and write to SQLite</criterion>
+    <criterion>Streamlit app starts on port 8501 with all 5 pages navigable</criterion>
+    <criterion>Meal natural-language parsing via Claude returns structured macros</criterion>
+    <criterion>All 5 Plotly charts render with real data from DB</criterion>
+    <criterion>Weekly AI report generates, stores in DB, and renders as markdown</criterion>
+    <criterion>Goal progress bars update as data is logged</criterion>
+    <criterion>CSV and PDF exports produce valid downloadable files</criterion>
+    <criterion>plyer notifications fire (visible on desktop) for reminders and goal milestones</criterion>
+    <criterion>All DB operations use SQLAlchemy ORM — no raw SQL string concatenation</criterion>
+    <criterion>ANTHROPIC_API_KEY never hardcoded — always from os.environ</criterion>
+  </success_criteria>
+</app_spec>

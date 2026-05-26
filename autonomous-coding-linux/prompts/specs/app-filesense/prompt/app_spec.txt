@@ -1,0 +1,75 @@
+<project_specification>
+  <overview>
+    <name>FileSense</name>
+    <description>Privacy-first local file search and organizer. A background indexer daemon watches configured folders, extracts text, and stores semantic embeddings in ChromaDB. The Tkinter overlay (Ctrl+Space) lets users search in natural language; Claude re-ranks results and can suggest folder reorganization. Everything runs locally — no file content ever leaves the machine.</description>
+    <audience>Developers, researchers, and knowledge workers with large local file collections who want semantic search without cloud storage.</audience>
+  </overview>
+  <technology_stack>
+    <language>Python 3.11+</language>
+    <ui>Tkinter overlay + ttkbootstrap (theming)</ui>
+    <background_daemon>Python watchdog 4.0 + threading</background_daemon>
+    <embedding_model>sentence-transformers (all-MiniLM-L6-v2, local, 384-dim)</embedding_model>
+    <vector_store>ChromaDB 0.5 (persistent, local)</vector_store>
+    <ai_reranking>Anthropic Claude (claude-sonnet-4-6) — snippets only</ai_reranking>
+    <file_parsing>pdfplumber, python-docx, markdown-it-py, chardet</file_parsing>
+    <metadata_db>SQLite via SQLAlchemy 2.0</metadata_db>
+    <file_watching>watchdog 4.0</file_watching>
+    <api_key>Read from /tmp/api-key file: with open("/tmp/api-key") as f: os.environ["ANTHROPIC_API_KEY"] = f.read().strip()</api_key>
+  </technology_stack>
+  <prerequisites>
+    <item>Python 3.11+ installed</item>
+    <item>pip install ttkbootstrap watchdog sentence-transformers chromadb anthropic pdfplumber python-docx markdown-it-py chardet sqlalchemy pytest</item>
+    <item>ANTHROPIC_API_KEY set in environment or /tmp/api-key file (optional — disable for pure local mode)</item>
+    <item>sentence-transformers downloads all-MiniLM-L6-v2 on first use (~90MB)</item>
+  </prerequisites>
+  <core_features>
+    <feature name="background_indexer">Daemon process: watchdog monitors folders for create/modify/delete; extracts text (.txt/.md/.py/.js/.ts/.go/.pdf/.docx/.csv); throttles to 5 files/sec; generates 384-dim embeddings; stores in ChromaDB + SQLite; skips binary/node_modules/.git/files>50MB</feature>
+    <feature name="semantic_search">Ctrl+Space spotlight overlay (< 80ms open); natural language query embedded real-time; ChromaDB ANN returns top-50; file cards with icon/name/folder/date/excerpt; keyboard navigation (arrow keys/Enter/Esc)</feature>
+    <feature name="claude_reranking">Re-ranks top-50 → top-10 for ambiguous queries; explains top result; Ask-about-files mode for Q&A using excerpts as context; snippets only (max 2000 tokens), never full files</feature>
+    <feature name="duplicate_detection">SHA-256 exact duplicates; ChromaDB cosine > 0.95 near-duplicates; side-by-side excerpt preview; one-click move-to-trash; undo available 60 seconds</feature>
+    <feature name="smart_folders">Claude receives filenames + top keywords (not full content); suggests subfolder names + file assignments as JSON; user approves file-by-file or bulk; atomic moves with undo stack</feature>
+    <feature name="file_tagging">AI auto-tags 3-5 topics on index; manual tag management in UI; tag-based search filter in overlay; FTS5 index for tag text search</feature>
+    <feature name="folder_config">Settings panel: add/remove watched folders; per-folder glob include/exclude patterns; max file size; pause/resume; index statistics per folder</feature>
+    <feature name="privacy">Embedding on CPU (all-MiniLM-L6-v2, no cloud); Claude called with snippets only; pure local mode option (disable Claude entirely); no telemetry</feature>
+  </core_features>
+  <database_schema>
+    indexed_files: (id PK, file_path TEXT UNIQUE NOT NULL, file_name TEXT NOT NULL, extension TEXT, size_bytes INTEGER, content_hash TEXT SHA256 for exact duplicate detection, chroma_doc_id TEXT UNIQUE ChromaDB doc ID, last_modified DATETIME NOT NULL, last_indexed DATETIME NOT NULL, word_count INTEGER, language TEXT detected)
+    file_tags: (id PK, file_id FK ON DELETE CASCADE, tag TEXT NOT NULL, source TEXT DEFAULT manual auto/manual, created_at DATETIME NOT NULL, UNIQUE(file_id, tag))
+    watch_folders: (id PK, folder_path TEXT UNIQUE NOT NULL, include_globs TEXT DEFAULT *, exclude_globs TEXT DEFAULT node_modules/**/.git/**, max_file_mb INTEGER DEFAULT 50, is_active BOOLEAN DEFAULT 1, added_at DATETIME NOT NULL)
+    search_history: (id PK, query TEXT NOT NULL, result_count INTEGER, top_file_id FK indexed_files, searched_at DATETIME NOT NULL)
+    FTS5 virtual: file_tags_fts(tag, file_id UNINDEXED, content=file_tags, content_rowid=id)
+    ChromaDB collection filesense_embeddings: document=text excerpt (first 512 tokens), metadata={file_path, file_name, extension, last_modified, tags}, embedding=384-dim float32 all-MiniLM-L6-v2
+  </database_schema>
+  <api_endpoints_summary>N/A — desktop Tkinter overlay + daemon process, no HTTP server</api_endpoints_summary>
+  <ui_layout>
+    System tray icon (daemon status, right-click: Pause/Settings/Quit).
+    Ctrl+Space triggers Tkinter overlay: search input field, result cards (file icon/name/path/date/excerpt), keyboard navigation, Claude explanation line at bottom.
+    Settings window: watched folders list, add/remove folders, exclusion patterns, duplicate threshold slider, index statistics.
+  </ui_layout>
+  <key_interactions>
+    1. Ctrl+Space → overlay opens &lt; 80ms → type "meeting notes API design" → results update within 300ms per keystroke → Enter → file opens in default app
+    2. Settings > Duplicates → daemon scans SHA-256 hashes → near-duplicates via ChromaDB cosine → UI lists pairs → Move to Trash → undo available 60s
+    3. Right-click messy folder → Suggest Organization → Claude receives filenames + keywords → returns JSON subfolder proposals → user approves → atomic file moves
+  </key_interactions>
+  <implementation_steps>
+    1. Daemon scaffold: filesense_daemon.py, watchdog setup, PID file management
+    2. Text extraction layer: pdfplumber, python-docx, plaintext, chardet encoding detection
+    3. Embedding pipeline: sentence-transformers loader, ChromaDB collection init, batch upsert
+    4. SQLite models: indexed_files, file_tags, watch_folders, search_history + FTS5 tag index
+    5. Tkinter overlay: ttkbootstrap themed window, keyboard bindings Ctrl+Space, result card widgets
+    6. Claude integration: re-ranking prompt, folder suggestion prompt, snippet-only payloads
+    7. Duplicate detector: SHA-256 hash comparison + ChromaDB cosine similarity scanner
+    8. Settings UI: watched folders management, exclusion patterns, duplicate threshold slider
+  </implementation_steps>
+  <success_criteria>
+    - Initial index of 10000 files completes within 20 minutes on modern laptop CPU
+    - Semantic search returns relevant results (top-3 contain target file) for test query set
+    - Duplicate detection finds 100% of exact duplicates
+    - Overlay opens in &lt; 80ms from Ctrl+Space
+    - Search results update within 300ms of each keystroke
+    - Daemon CPU usage &lt; 5% during idle
+    - ChromaDB and SQLite stay consistent after ungraceful daemon shutdown (WAL mode)
+    - FTS5 tag search returns results in &lt; 50ms for 100k tag entries
+    - Claude called with excerpts only (max 2000 tokens), never full file content
+  </success_criteria>
+</project_specification>
