@@ -32,3 +32,6 @@ agents/summary.txt
 
 # Hook 自動更新的 session 狀態檔（每次觸發都變，不需版控）
 **/.claude/session-state.md
+
+# 排程任務暫存鎖檔（stop hook 自動生成，不需版控）
+**/.claude/scheduled_tasks.lock
