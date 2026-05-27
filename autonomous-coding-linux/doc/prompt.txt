@@ -1,0 +1,13 @@
+## Session 12 — 2026-05-27
+
+[診斷 CI/CD pipeline 問題]
+apiwatcher-run1 的 verify-and-merge.yml 送出 repository_dispatch HTTP 204 但 GitHub Actions 完全沒有新的 run，請診斷原因並修復。
+
+[修復 YAML block scalar heredoc 問題]
+GitHub Actions verify-and-merge.yml 的 Python heredoc 造成 YAML 無效，用 Python one-liner shell 變數的方式修復。
+
+[修復 gh pr merge 找不到 git repo]
+repository_dispatch workflow 沒有 actions/checkout，gh pr merge/issue close 需要加 --repo 旗標。
+
+[端對端 pipeline 驗證]
+Issue #1 → Feature #42 → PR #2 squash-merged → Issue #1 closed 全流程驗證通過。
